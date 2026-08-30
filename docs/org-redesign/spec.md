@@ -151,3 +151,8 @@ Out of Scope 3건의 착수 포인터:
 - T1~T3 실배치(_fresh 픽스처 63건, 산출물 독립 검증 완료): 정산 등식 성립(63=51+9+3, 2배치), md/=meta/=51쌍, 격리 13건 사유서, pii_positive=건너뜀·pii_negative=적재(과잉차단 없음), 부재 함정 문항 "없음" 정답 유지, 원본 무수정.
 - T4: 이 세션의 opencrab 인스턴스 index_size=0 — DB 정본은 인스턴스·데이터 디렉토리에 종속되어 가시성이 붙는 곳에 따라 달라짐을 실측. 파일 정본 교체 논거를 지지.
 - 남은 결정: opencrab 완전 제거 여부는 mycrew 라이브 인스턴스에서 T5(병행 적재 이득 실측) 후. 현 지시서는 이미 "지시 시에만 병행"으로 강등 완료.
+
+## opencrab → ingesttiger 데이터 연결 완료 (2026-08-31)
+
+- 마이그레이션 배치 실행: opencrab 인스턴스 2곳(test/test 353노드·767엣지·77소스, mycrew live 21·30·19)을 읽기 전용으로 추출, ingestiger 코퍼스에 graph/nodes.md(374)·graph/edges.md(797) 신설 + meta/ 원본 JSON 보존 + index.md 소스 96행 + 골든 1문항 추가. 정산: 발견=적재 전건, 실패 0. 원본 DB 4곳 봉인.
+- 잔여: mcp-base.json의 LOCAL_DATA_DIR가 빈 인스턴스(C:/mycrew/opencrab-data)를 가리키는 불일치 — opencrab을 파생 인덱스로 쓸 경우에만 수정 의미 있음(T5 결정과 연동).
