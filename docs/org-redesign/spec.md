@@ -72,3 +72,25 @@ C안(최소수정+체인 명문화) 위에, 운영 원칙 4개와 실사용 케�
 1. 케이스 b가 지시서만으로 재현된다 (체인 명문화 확인)
 2. 모든 직원 meta.json에 model 필드가 있고 팀 소속이 실제 역할과 일치한다
 3. P2 절차 문서가 존재하고, 첫 적용 사례(스킬 1개) 검증을 통과한다
+
+## Related Documents & 용어 (콜드리드 지적 반영)
+
+선행 결정·근거: [../paperthin-redesign/findings.md](../paperthin-redesign/findings.md) — "C안"의 원문(재배열 4안 비교), 구조 리뷰, first nail 결과가 모두 여기 있다. "지시서"란 `config/agents/<id>/role-directive.md`를 말한다.
+
+| 용어 | 뜻 |
+| --- | --- |
+| 직원 | AI 에이전트. 정의 = `config/agents/<id>/`의 meta.json+role-directive.md |
+| Jarvis / genie | 오케스트레이터 직원(id: genie). 이름은 온보딩 입력값 — 아샬·동국·Mr세균도 마찬가지로 P3의 입력 이름이지 고정 캐릭터가 아님 |
+| genie-config | 런타임 설정 파일 `history/genie-config.json` (gitignore, src/agents/genie.ts가 로드) |
+| hermes | 오퍼레이터 셸 직원 — 텔레그램 지시 수행 + 반복 워크플로 스킬화 |
+| ingest-crab / corpus-keeper | 지식관리팀 체인의 적재/반영 담당 (인계 규칙은 각 role-directive.md 말미) |
+| anandara | 리포 밖 확장 앱(`../mycrew-works/anandara`) — app-registry가 호스트에 존재할 때만 로스터에 가산 |
+| SPF | 고객사 계란(egg) 사업 도메인명 (팀 이름의 유래) |
+| paperthin / ssotize / re0 / shower / hate | 아티팩트 위생 스킬 스위트(LilMGenius/paperthin v0.9.4)와 그 개별 스킬 — "반사"란 해당 스킬의 규칙을 지시서에 상시 습관으로 내장했다는 뜻 |
+| mycrew | 이 시스템의 제품명(MyCrew). 리포=soloforce2, 패키지=my-crew |
+| UI (P1) | 웹 대시보드(포트 3456)의 직원 설정 화면 |
+
+Out of Scope 3건의 착수 포인터:
+- OAuth 게이트: `src/server/auth-google.ts`(현행 로그인) + `src/server/index.ts`(미들웨어 장착 지점) + P4의 도메인 모드 판별은 `.env`의 도메인 설정 유무
+- 스킬 검증 Hook: 실행 지점 = `src/server/routes/store-github-skills.ts`의 설치 직전(파싱 함수 `parseFrontmatter` 이후)
+- mail·calendar 배선: `apps/mail`(수신함) + genie의 allowedTools(`config/agents-default.json`의 genie 항목)에 도구 추가, 폴더 조회는 meta.json `readPaths`
