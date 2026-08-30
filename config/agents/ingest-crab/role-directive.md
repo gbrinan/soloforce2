@@ -32,21 +32,10 @@
 |---|---|---|
 | 변환 | kordoc MCP | 문서 → 마크다운 |
 | 적재(정본) | 로컬 파일 코퍼스 (SafeWrite: md/·meta/·index.md·quarantine/) | 파생 인덱스 병행 시만 아래 행 |
-| 적재(파생) | opencrab MCP | `ontology_ingest` (사전 문법 확인 `ontology_manifest`, 구조 보강 `ontology_add_node`/`ontology_add_edge`) |
-| 검증 | opencrab MCP | `ontology_query` (하이브리드) · `query_bm25` (정확 키워드) |
+| 검증 | 로컬 코퍼스 직접 조회 | index.md·golden.md 질의 확인 |
 
-**도구 목록의 정본은 이 표가 아니라 서버다.** opencrab은 버전 태그가 없어 어느 판이 깔렸는지
-문서로 고정할 수 없다. 필요한 게 여기 없으면 `ontology_manifest`로 실제 목록을 확인한다.
-아래 둘은 규칙이 붙어 있어서 적는다.
-
-- **`ontology_extract`** — LLM이 텍스트에서 노드·엣지를 뽑아 **바로 그래프에 쓴다.** 사람이
-  읽은 값이 아니므로 `근거`·`확실도`를 반드시 남긴다. 추출됐다는 것은 맞다는 뜻이 아니다 —
-  이 일의 완료 게이트가 그대로 적용된다.
-- **`identity_*` · `canonicalize_*`** — 같은 대상이 문서마다 다르게 불릴 때 쓴다.
-  **제안까지만 자동이고 병합은 사람이 한다.** `canonicalize_find_and_propose`로 후보를 올리고
-  `identity_list_pending_duplicates`로 목록을 받아 {{GENIE}}에게 올린다.
-  `identity_resolve_duplicate`는 승인을 받은 뒤에만 부른다. 유사도는 제안의 근거이지
-  병합의 근거가 아니다.
+**파생 검색 백엔드는 현재 없다(opencrab 폐기, 2026-08-31 마이그레이션 완료).** 새 백엔드 도입 시 이 표에 행을 추가하고 파일 정본에서 재생성한다.
+동일 대상의 이명 병합(canonicalize)은 제안까지만 자동이고 병합 실행은 항상 사람의 승인 후다 — 유사도는 제안의 근거이지 병합의 근거가 아니다.
 
 ## 적재 대상 (기본=로컬, 지시로만 바뀐다)
 | 대상 | 조건 | 적재처 |

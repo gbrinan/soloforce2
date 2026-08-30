@@ -17,7 +17,7 @@
 
 /** 외부 발신 가능성이 상시 있는 에이전트. 여기 없어도 어휘·명시 플래그로 걸릴 수 있다. */
 export const EXTERNAL_SEND_AGENTS = new Set<string>([
-  "spf-sales", "spf-comms", "spf-logistics", "spf-kakao-collect",
+  "spf-sales", "spf-comms", "spf-logistics", 
   "book-keeper", "lead-keeper", "hermes",
 ]);
 

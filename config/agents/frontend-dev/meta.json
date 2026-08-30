@@ -7,5 +7,8 @@
   "model": "claude-sonnet-5",
   "isCore": false,
   "permLevel": "normal",
-  "description": "React 컴포넌트 구현·반응형·접근성·상태관리 (React/TypeScript/Tailwind/Vite/Zustand), tsc 검증 필수"
+  "description": "React 컴포넌트 구현·반응형·접근성·상태관리 (React/TypeScript/Tailwind/Vite/Zustand), tsc 검증 필수",
+  "postValidation": [
+    "[ -f tsconfig.json ] && npx tsc --noEmit || echo \"skip: no tsconfig\""
+  ]
 }
