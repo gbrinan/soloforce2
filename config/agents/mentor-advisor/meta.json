@@ -2,7 +2,7 @@
   "id": "mentor-advisor",
   "name": "멘토",
   "jobTitle": "멘토 조언 아카이브",
-  "team": "기획팀",
+  "team": "지식관리팀",
   "adapter": "claude-code",
   "model": "claude-sonnet-5",
   "isCore": false,
