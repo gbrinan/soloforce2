@@ -863,14 +863,15 @@ function App() {
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: autoModeOn ? '#6366F1' : '#7D8699', display: 'inline-block' }} />
               {autoModeOn ? t('app.auto') : t('app.manual')}{autoModeOn && autoCount > 0 ? ` ${autoCount}` : ''}
             </button>
-            <button onClick={() => setViewMode(v => v === 'terminal' ? 'chat' : 'terminal')} title={viewMode === 'terminal' ? t('app.terminalModeTitle') : t('app.chatModeTitle')} style={{ background: viewMode === 'terminal' ? 'color-mix(in srgb, var(--accent-info, #818CF8) 20%, transparent)' : 'color-mix(in srgb, var(--accent-success) 20%, transparent)', border: `1px solid ${viewMode === 'terminal' ? 'var(--accent-info, #818CF8)' : 'var(--accent-success)'}`, color: viewMode === 'terminal' ? 'var(--accent-info, #818CF8)' : 'var(--accent-success)', padding: '1px 8px', borderRadius: 10, fontSize: 'var(--font-s)', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: viewMode === 'terminal' ? 'var(--accent-info, #818CF8)' : 'var(--accent-success)', display: 'inline-block' }} />
-              {viewMode === 'terminal' ? t('app.terminal') : t('app.chat')}
-            </button>
-            <button onClick={() => setViewMode(v => v === 'jarvis' ? 'chat' : 'jarvis')} title={viewMode === 'jarvis' ? t('app.chatModeTitle') : t('app.jarvisModeTitle')} style={{ background: viewMode === 'jarvis' ? 'color-mix(in srgb, var(--accent-info, #818CF8) 20%, transparent)' : 'color-mix(in srgb, var(--accent-success) 20%, transparent)', border: `1px solid ${viewMode === 'jarvis' ? 'var(--accent-info, #818CF8)' : 'var(--accent-success)'}`, color: viewMode === 'jarvis' ? 'var(--accent-info, #818CF8)' : 'var(--accent-success)', padding: '1px 8px', borderRadius: 10, fontSize: 'var(--font-s)', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: viewMode === 'jarvis' ? 'var(--accent-info, #818CF8)' : 'var(--accent-success)', display: 'inline-block' }} />
-              {viewMode === 'jarvis' ? t('app.chat') : t('app.jarvis')}
-            </button>
+            {/* 3모드 탭: 채팅 · 터미널 · Voice — 토글 2개를 세그먼트 탭으로 통합 */}
+            <span style={{ display: 'inline-flex', border: '1px solid var(--accent-info, #818CF8)', borderRadius: 10, overflow: 'hidden' }}>
+              {([['chat', t('app.chat')], ['terminal', t('app.terminal')], ['jarvis', t('app.jarvis')]] as ['chat' | 'terminal' | 'jarvis', string][]).map(([m, label]) => (
+                <button key={m} onClick={() => setViewMode(m)} title={label}
+                  style={{ background: viewMode === m ? 'color-mix(in srgb, var(--accent-info, #818CF8) 25%, transparent)' : 'transparent', border: 'none', color: viewMode === m ? 'var(--accent-info, #818CF8)' : 'var(--text-muted, #7D8699)', padding: '1px 8px', fontSize: 'var(--font-s)', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: viewMode === m ? 600 : 400 }}>
+                  {label}
+                </button>
+              ))}
+            </span>
           </span>
           )}
         </h1>
