@@ -94,3 +94,21 @@ Out of Scope 3건의 착수 포인터:
 - OAuth 게이트: `src/server/auth-google.ts`(현행 로그인) + `src/server/index.ts`(미들웨어 장착 지점) + P4의 도메인 모드 판별은 `.env`의 도메인 설정 유무
 - 스킬 검증 Hook: 실행 지점 = `src/server/routes/store-github-skills.ts`의 설치 직전(파싱 함수 `parseFrontmatter` 이후)
 - mail·calendar 배선: `apps/mail`(수신함) + genie의 allowedTools(`config/agents-default.json`의 genie 항목)에 도구 추가, 폴더 조회는 meta.json `readPaths`
+
+## 중복·이음새 점검 (콜드리드 + 내부 판단, 2026-08-31)
+
+콜드 리뷰어가 지목한 중복 7건을 내부 맥락으로 재판정:
+
+| 지목 | 콜드 제안 | 내부 판단 |
+| --- | --- | --- |
+| data-collector ↔ scout 4종 | 폐지·흡수 | **부분 수용**: 전문 스카우트가 없는 도메인의 범용 수집 전담으로 스코프 명문화. staged 리서치(insight-researcher)의 실행 손발 역할은 유지 |
+| tester ↔ Mr세균(CQO) | 통합 | **기각, 경계 명문화**: tester=개발 중 테스트 작성·실행(팀 내부), Mr세균=최종 승인 게이트(팀 외부·전사). 이중 검증은 의도된 설계 |
+| hermes ↔ Jarvis | 어댑터로 흡수 | **부분 수용**: 흡수 대신 운영팀 이동 + 케이스 c의 "결합 모드"로 공식화. 스킬화 임무는 hermes 고유가치라 유지 |
+| ax-consultant ↔ ax-scout | 모호 | 경계 명문화: scout=수집만, consultant=수집물 통합·설계. 조사 요청 기본 라우팅=scout |
+| fleet-status ↔ book-keeper "비용" | 모호 | SSOT 명문화: 장부 정본=book-keeper(쓰기), fleet-status=읽기 전용 요약 뷰 |
+| spf-comms ↔ spf-sales | 뒷절반 부재 | 경계 명문화: sales=신규 퍼널(발굴~미팅), comms=기존 고객 대화(카톡), logistics=배송 |
+| doc-writer ↔ 동국(CSO) | 모호 | 경계 명문화: 동국=기획 판단·우선순위(관리), doc-writer=집필 실무. "써줘"의 기본 라우팅=doc-writer |
+
+라우팅 규칙 원칙: **모호한 요청의 기본 수신자를 직원마다 한 줄로 지정**하고(예: "조사"→도메인 스카우트, 없으면 data-collector), Jarvis 프롬프트에 이 표를 내장한다.
+
+승인 대기 변이: ① hermes 팀 이동(리서치→운영) ② 위 경계 7줄을 각 role-directive.md에 1줄씩 추가 ③ Jarvis 라우팅 표 내장.
