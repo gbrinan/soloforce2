@@ -17,6 +17,21 @@ function check(name: string, ok: boolean, got: unknown): void {
   console.log(`[${tag}] ${name} | got=${JSON.stringify(got)}`);
 }
 
+// 자식 프로세스는 반드시 process.execPath(현재 실행 중인 node의 절대경로)로 띄운다.
+// spawn("node", ...)는 PATH 해석에 의존하는데 이 머신에는 node가 PATH에 없다
+// (npx·npm·git도 마찬가지 — procedure_bash-enoent-windows). 그 결과 spawn이 ENOENT를
+// 'error' 이벤트로 던지고, 핸들러가 없어 프로세스가 통째로 크래시했다. 단언 하나 실패가
+// 아니라 스위트가 죽어 "=== n/n PASS ===" 줄조차 안 나오는 상시 red의 원인이었다(2026-08-10).
+// error 핸들러도 함께 붙여, 앞으로 spawn이 실패하더라도 크래시 대신 진단 가능한 FAIL이 되게 한다.
+function spawnNode(args: string[]) {
+  const p = spawn(process.execPath, args, { stdio: "ignore" });
+  p.on("error", (e) => {
+    console.log(`[FAIL] 자식 프로세스 spawn 실패 (${process.execPath}) | ${e.message}`);
+    fail++;
+  });
+  return p;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -39,7 +54,7 @@ async function main(): Promise<void> {
 
   // S2: 살아있는 자식 SIGKILL
   {
-    const proc = spawn("node", ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+    const proc = spawnNode(["-e", "setTimeout(()=>{}, 60000)"]);
     proc.unref();
     await sleep(50);
     const pid = proc.pid;
@@ -56,7 +71,7 @@ async function main(): Promise<void> {
 
   // S3: stale PID (자식이 이미 자연 종료)
   {
-    const proc = spawn("node", ["-e", "process.exit(0)"], { stdio: "ignore" });
+    const proc = spawnNode(["-e", "process.exit(0)"]);
     const pid = proc.pid;
     await new Promise<void>((r) => proc.on("exit", () => r()));
     await sleep(50); // 커널 reaper 여유
@@ -72,7 +87,7 @@ async function main(): Promise<void> {
   {
     let captured: number | undefined;
     const onSpawn = (pid: number) => { captured = pid; };
-    const proc = spawn("node", ["-e", "setTimeout(()=>{}, 1000)"], { stdio: "ignore" });
+    const proc = spawnNode(["-e", "setTimeout(()=>{}, 1000)"]);
     proc.unref();
     if (proc.pid && onSpawn) onSpawn(proc.pid);
     await sleep(20);

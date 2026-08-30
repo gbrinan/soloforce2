@@ -4,7 +4,7 @@
   "jobTitle": "고객사별 AX 컨설팅 — 자료 수집·통합·제품/교육 설계 담당",
   "team": "리서치팀",
   "adapter": "claude-code",
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5",
   "isCore": false,
   "permLevel": "normal",
   "maxTurns": 60,

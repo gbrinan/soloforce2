@@ -2,7 +2,7 @@
 // 검증 항목: 가상 채용 자동 디렉토리, jobType 템플릿 로드, 플레이스홀더 8개 치환,
 //            jobType 폴백, 인라인 systemPrompt 우선, 로컬 오버라이드 우선,
 //            isCore 누락 경고, 가상 해고 후 디렉토리 잔존.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
@@ -35,7 +35,14 @@ if (!existsSync(AGENTS_FILE)) {
 // 백업 후 임시 채용 → 검증 → 원복
 const original = readFileSync(AGENTS_FILE, "utf-8");
 const data = JSON.parse(original) as { agents: Array<Record<string, unknown>> };
-const baseline = data.agents.length;
+
+// 기준선은 반드시 레지스트리에서 "채용 전"에 잡는다 — agents.json의 배열 길이가 아니다.
+// getAllWorkerAgents()는 agents.json 등재분 + config/agents/*/meta.json 자동등재분(15-D)을
+// 합친 결과다. agents.json 길이를 기준선으로 쓰면 비교 양변의 출처가 달라져,
+// 자동등재 직원이 한 명이라도 있는 순간 이 단언은 영구 red가 된다.
+// (2026-08-10 실측: agents.json 20 + 자동등재 10 = 30 → "expected 24, got 34"로 상시 실패)
+const { getAllWorkerAgents, ensureAllAgentDirs, consumeUnknownJobTypes } = await import("../src/agent-registry.js");
+const beforeIds = new Set(getAllWorkerAgents().map((a) => a.id));
 
 // 가상 채용: jobType 미존재(marketer) + 인라인 systemPrompt 미설정
 data.agents.push({
@@ -104,7 +111,15 @@ data.agents.push({
   writePaths: [`/history/outputs/${VIRT_INLINE_ID}/**`],
 });
 
+const preMtime = statSync(AGENTS_FILE).mtimeMs;
 writeFileSync(AGENTS_FILE, JSON.stringify(data, null, 2));
+// loadAgents()는 mtime으로 캐시를 무효화한다(agent-registry.ts). 위에서 기준선을 잡느라
+// 이미 캐시가 채워졌으므로, 쓰기가 같은 ms에 떨어지면 재로드가 일어나지 않아 가상 4명이
+// 조회되지 않는다(flaky). mtime이 안 변했으면 명시적으로 밀어준다.
+if (statSync(AGENTS_FILE).mtimeMs === preMtime) {
+  const t = new Date(preMtime + 10);
+  utimesSync(AGENTS_FILE, t, t);
+}
 
 // 로컬 오버라이드 파일 미리 작성
 const localDir = join(HIST_AGENTS, VIRT_LOCAL_ID);
@@ -113,16 +128,18 @@ writeFileSync(join(localDir, "system-prompt.md"), "LOCAL_OVERRIDE_MARKER_99 — 
 
 try {
   // mtime 가드 우회: agents.json 변경됨 → loadAgents가 재로드
-  const { getAllWorkerAgents, ensureAllAgentDirs, consumeUnknownJobTypes } = await import("../src/agent-registry.js");
-
   ensureAllAgentDirs();
   const all = getAllWorkerAgents();
 
-  // ① 신규 직원 4명이 등록됐는지
+  // ① 신규 직원 4명이 등록됐는지 — 검증 대상은 총원 절대값이 아니라 "증분 4"다.
+  // ID 집합으로 비교하므로 조직 인원·자동등재 수가 어떻게 변해도 영향을 받지 않는다.
+  const afterIds = new Set(all.map((a) => a.id));
+  const VIRT_IDS = [VIRT_ID, VIRT_JOBTYPE_KNOWN_ID, VIRT_LOCAL_ID, VIRT_INLINE_ID];
+  const missingVirt = VIRT_IDS.filter((id) => !afterIds.has(id));
   check(
     "① 가상 채용 등록 (4명 추가)",
-    all.length === baseline + 4,
-    `expected ${baseline + 4}, got ${all.length}`,
+    missingVirt.length === 0 && afterIds.size === beforeIds.size + 4,
+    `before=${beforeIds.size}, after=${afterIds.size}, 누락=[${missingVirt.join(", ")}]`,
   );
 
   // ② 자동 디렉토리/파일 생성

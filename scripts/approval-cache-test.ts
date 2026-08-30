@@ -7,6 +7,7 @@ import {
   resolveApproval,
   revokeRecentApprovals,
   autoDecide,
+  isOwnerAway,
   type ApprovalRequest,
 } from "../src/server/approvals.js";
 
@@ -77,16 +78,26 @@ function check(name: string, ok: boolean, info?: string): void {
   );
 }
 
-// (e) orchestrator(마이크루) 본인 요청은 우회 차단 — 이전 allow가 있어도 즉시 allow되지 않음
+// (e) orchestrator(마이크루) 본인 요청은 우회 차단 — 이전 allow가 있어도 즉시 allow되지 않음.
+// 단 이 가드는 "재석" 전제다. 부재중 모드에서는 설계상 해제된다 —
+// approvals.ts:328 `(req.agentRole !== "orchestrator" || ownerAway) && hasApprovedRecord(...)`.
+// 부재중 여부는 런타임 상태(history/.owner-away)이고 setOwnerAway()는 그 파일을 실제로 덮어쓴다.
+// 테스트가 상태를 바꾸면 그 사이 들어오는 진짜 승인 요청의 판정까지 흔들리므로, 상태는
+// 건드리지 않고 "현재 모드에 대한 명세"를 검증한다.
+// (2026-08-10: 부재중 모드가 켜져 있던 동안 이 케이스가 상시 red였다 — 코드 결함이 아니라
+//  테스트가 전제 조건을 고정하지 않은 탓이다.)
 {
   const path = "/notrepo/cache-test/e.txt";
+  const away = isOwnerAway();
   const first = createApproval({ agentRole: "orchestrator", tool: "SafeWrite", path });
   resolveApproval(first.id, true, "user");
   const second = createApproval({ agentRole: "orchestrator", tool: "SafeWrite", path });
   check(
-    "(e) orchestrator 본인 요청 → 캐시 우회 차단",
-    second.status === "pending_chat",
-    `status=${second.status} source=${second.decisionSource}`,
+    `(e) orchestrator 본인 요청 → ${away ? "부재중이라 가드 해제 (즉시 allow)" : "재석이라 캐시 우회 차단"}`,
+    away
+      ? second.status === "allowed" && second.decisionSource === "auto_rule_repeat"
+      : second.status === "pending_chat",
+    `ownerAway=${away} status=${second.status} source=${second.decisionSource}`,
   );
 }
 

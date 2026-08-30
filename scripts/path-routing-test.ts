@@ -1,8 +1,13 @@
 // 산출물 경로 분리 가드 회귀 테스트
-// safefs-server.ts(isSelfPattern/isUniversalPattern, SELF_*/CWD_* 분류)
-// + jobs.ts(extractOutputPaths/checkOutputsMissing) 분기 로직을
+// safefs-server.ts(isSelfPattern/isUniversalPattern, SELF_*/CWD_* 분류)를
 // 동등 시뮬레이션으로 검증. 원본 함수가 export되지 않으므로 본체 카피.
 // 원본 변경 시 이 파일도 동기 유지 필요.
+//
+// [2026-08-10] jobs.ts의 extractOutputPaths/checkOutputsMissing 원본은 호출부 0건
+// 데드코드로 확인돼 삭제됐다(승인 후 처리). 아래 사본은 삭제 시점의 동결 스냅샷이며,
+// 확장자 절단 결함(접두 확장자 절단 — .mdx→.md, .jsonl→.json)을 그대로 안고 있다.
+// 이 사본을 근거로 원본을 복원하지 마라. 산출물 경로 추출의 정본은
+// src/server/utils/artifact-ext.ts 의 extractOutputPathsFromText 다.
 
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve as pathResolve, join, dirname } from "node:path";
