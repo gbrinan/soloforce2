@@ -1,0 +1,57 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--headless"
+      ]
+    },
+    "excel": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@negokaz/excel-mcp-server"
+      ]
+    },
+    "lighthouse": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@danielsogl/lighthouse-mcp@latest"
+      ]
+    },
+    "opencrab": {
+      "command": "opencrab",
+      "args": [
+        "serve"
+      ],
+      "env": {
+        "LOCAL_DATA_DIR": "C:/mycrew/opencrab-data"
+      }
+    },
+    "kordoc": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "kordoc",
+        "mcp"
+      ]
+    },
+    "supabase": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=jditahiwwhrugzyamecl"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": ""
+      }
+    }
+  }
+}

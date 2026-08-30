@@ -1,0 +1,309 @@
+/**
+ * QA 자동 판정 연동 (#10)
+ * - QA 잡 완료 시 verdict 자동 감지
+ * - FAIL → 핫픽스 위임 + 재검증 큐 자동 생성
+ * - PASS → self-restart 알림 (필요시)
+ * - 3회 연속 FAIL → 사용자 에스컬레이션 + 사이클 중단
+ */
+
+import { randomUUID } from "node:crypto";
+import { basename, join, isAbsolute } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import type { Job } from "../types.js";
+import { PROJECT_SELF_DIR } from "../config.js";
+import { addGenieMessage, isSelfRestartPending } from "./chat.js";
+import { getWorkerAgent } from "../agent-registry.js";
+import { isQaFailVerdict } from "./qa-verdict.js";
+import type { TrajectoryVerdict } from "./trajectory-judge.js";
+
+export type QaVerdict = "pass" | "fail" | "unknown";
+
+export interface PrecheckResult {
+  pass: boolean;
+  failures: string[];
+}
+
+/**
+ * 작업 완료 보고서에 명시된 산출물 파일 실존·mtime 검증 (거짓 보고 차단)
+ * @param job 완료된 워커 잡
+ * @param lookupJob 원본 job 조회 콜백 (선택) — 재제출 체인(originalJobId)일 때 mtime 기준점을 원본 job.startedAt으로 잡기 위함.
+ *   미제공 시 job.startedAt 그대로 사용 (테스트 호환).
+ * @returns { pass: true, failures: [] } 검증 통과 / { pass: false, failures: [...] } 실패 목록
+ */
+export function precheckArtifacts(
+  job: Job,
+  lookupJob?: (id: string) => Job | undefined,
+): PrecheckResult {
+  let text = job.logs.join("\n");
+
+  // 재제출 job(request가 "[산출물 검증 실패 — 재제출 요구]"로 시작하거나 originalJobId 보유)의 경우,
+  // 이전 실패 보고서에 포함된 경로("검증 경로: /...")가 경로 추출 대상이 되어 무한 루프를 일으킴.
+  // "## 검증 실패 사유" ~ "## 필수 조치" 블록을 스트립한 뒤 파싱한다.
+  if (
+    job.request.startsWith("[산출물 검증 실패 — 재제출 요구]") ||
+    job.originalJobId
+  ) {
+    text = text.replace(
+      /## 검증 실패 사유[\s\S]*?(?=##\s|$)/g,
+      "",
+    );
+  }
+  
+  // 1. 파일 경로 추출 패턴 (명시적 라벨 기반 — 백틱 단독 인용 제외)
+  // 긴 확장자 우선 (tsx|ts, jsx|js) — .tsx를 .ts로 잘못 매칭 방지
+  const pathPatterns = [
+    /수정\s*파일[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
+    /생성\s*파일[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
+    /산출물[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
+    /파일[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
+    /경로[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
+    /보고서[:：]\s*`?([^\s`]+\.md)/gi,
+  ];
+  
+  const paths = new Set<string>();
+  for (const pattern of pathPatterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const p = match[1].trim();
+      // URL 제외 (http://, file:// 등)
+      if (p && !p.startsWith("http") && !p.includes("://")) {
+        paths.add(p);
+      }
+    }
+  }
+  
+  // 2. 파일 0개 → PASS (진단/리서치 작업은 보고서만 작성)
+  if (paths.size === 0) {
+    return { pass: true, failures: [] };
+  }
+  
+  // 2.5. no-op 보고 감지 (이미 적용/기존 확인 키워드 → mtime 검증 스킵)
+  // 용도: dev-pm no-op 보고 무한 루프 차단 — 기존 적용 확인 보고서의 mtime 검증 우회
+  const isNoOpReport = /이미\s*(적용|완료|존재)|기존\s*적용\s*확인|no-op/i.test(text);
+  
+  // 3. 검증: 존재 + mtime (외부 프로젝트는 job.cwd 기준 경로 해석)
+  const failures: string[] = [];
+  for (const path of paths) {
+    // 경로 해석: 절대 경로면 그대로, 상대 경로면 job.cwd 기준
+    // (mycrew-photos 등 외부 프로젝트 작업 시 올바른 경로에서 검증)
+    const fullPath = isAbsolute(path) ? path : join(job.cwd || PROJECT_SELF_DIR, path);
+    
+    // 존재 검증
+    if (!existsSync(fullPath)) {
+      failures.push(`파일 미존재: ${path} (검증 경로: ${fullPath})`);
+      continue;
+    }
+    
+    // mtime 검증 (no-op 보고는 스킵)
+    // 재제출 체인(originalJobId)이면 원본 job의 startedAt을 기준으로 사용
+    // → 재제출 시점 startedAt 사용 시 항상 mtime < startedAt이 되어 무한 루프 발생하는 문제 차단
+    if (!isNoOpReport) {
+      let baselineStartedAt = job.startedAt;
+      if (job.originalJobId && lookupJob) {
+        const origJob = lookupJob(job.originalJobId);
+        if (origJob?.startedAt) baselineStartedAt = origJob.startedAt;
+      }
+      if (baselineStartedAt) {
+        const stat = statSync(fullPath);
+        const startTime = new Date(baselineStartedAt);
+        if (stat.mtime < startTime) {
+          failures.push(
+            `파일 mtime이 작업 시작 이전: ${path} ` +
+            `(mtime=${stat.mtime.toISOString()}, started=${baselineStartedAt}` +
+            `${job.originalJobId ? `, originalJobId=${job.originalJobId.slice(0, 8)}` : ""})`,
+          );
+        }
+      }
+    }
+  }
+  
+  return { pass: failures.length === 0, failures };
+}
+
+// <!--QA_AUTO_CYCLE:cycleId:failCount-->
+const CYCLE_TAG_RE = /<!--QA_AUTO_CYCLE:([^:>]+):(\d+)-->/;
+
+// cycleId → 현재 연속 FAIL 횟수 (메모리; selfRestart 후 초기화됨 — 의도적)
+const activeCycles = new Map<string, number>();
+// QA→핫픽스→재QA 자동 사이클 상한. 각 사이클 = QA 세션 + 핫픽스 세션(둘 다 고비용)이라
+// 다턴 누적·토큰 소모의 주 증폭원. 2회 실패 시 사람 확인으로 에스컬레이션(무한 반복 차단).
+const MAX_FAILS = 2;
+
+function isSelfProject(projectName?: string): boolean {
+  if (!projectName) return false;
+  const folderName = basename(PROJECT_SELF_DIR);
+  const selfNames = new Set(["self", folderName, folderName.toLowerCase()]);
+  return selfNames.has(projectName.toLowerCase());
+}
+
+export function detectQaVerdict(logs: string[]): QaVerdict {
+  const text = logs.join("\n");
+  // 조건부 합격 → pass (불합격보다 먼저 체크)
+  if (/조건부\s*합격/.test(text)) return "pass";
+  // 한국어 판정
+  const krMatch = text.match(/종합\s*판정\s*[—–\-]\s*\*\*(합격|불합격)/i);
+  if (krMatch) return krMatch[1] === "합격" ? "pass" : "fail";
+  // 영문 혼용
+  const enMatch = text.match(/\*\*(PASS|FAIL)\*\*/i);
+  if (enMatch) return enMatch[1].toUpperCase() === "PASS" ? "pass" : "fail";
+  // v0.1.6 폴백: [결과] FAIL / FAIL. 패턴
+  if (isQaFailVerdict(text, undefined)) return "fail";
+  return "unknown";
+}
+
+function extractCycleInfo(request: string): { cycleId: string; failCount: number } | null {
+  const m = request.match(CYCLE_TAG_RE);
+  if (!m) return null;
+  return { cycleId: m[1], failCount: parseInt(m[2], 10) };
+}
+
+function inferHotfixAgent(job: Job): string {
+  if (isSelfProject(job.projectName)) return "dev-pm";
+  const req = job.request;
+  if (/planner|cso/i.test(req)) {
+    const planner = getWorkerAgent("planner-researcher");
+    if (planner) return planner.id;
+  }
+  return "dev-pm";
+}
+
+type CycleInfo = { cycleId: string; failCount: number };
+
+/** PASS 처리 — 사이클 정리 + self restart 알림 (regex/trajectory 양쪽 경로에서 공용) */
+function handlePassVerdict(job: Job, cycleInfo: CycleInfo | null): void {
+  if (cycleInfo) activeCycles.delete(cycleInfo.cycleId);
+  // self 프로젝트 + restart 대기 중 → MyCrew에 알림
+  if (isSelfProject(job.projectName) && isSelfRestartPending()) {
+    addGenieMessage(
+      "[자동 판정] ✅ QA 합격 — self 코드 변경 누적, RESTART 실행 필요.",
+      { internal: true },
+    );
+  }
+}
+
+export function handleQaJobComplete(job: Job): void {
+  if (job.agent !== "qa") return;
+  // completed만 처리 (failed/timeout은 무시 — QA 실행 자체 실패)
+  if (job.status !== "completed") return;
+
+  const verdict = detectQaVerdict(job.logs);
+  const cycleInfo = extractCycleInfo(job.request);
+
+  if (verdict === "pass") {
+    handlePassVerdict(job, cycleInfo);
+    return;
+  }
+
+  if (verdict === "unknown") {
+    // regex 불명확 → trajectory LLM 판정 시도 (dynamic import — 기존 패턴과 동일, 순환 참조 방지)
+    void (async () => {
+      let tv: TrajectoryVerdict | null = null;
+      try {
+        const { judgeTrajectory, makeDefaultLlmRunner } = await import("./trajectory-judge.js");
+        tv = await judgeTrajectory(job, makeDefaultLlmRunner());
+      } catch (err) {
+        console.warn("[QA-AutoJudge] trajectory judge 실행 실패:", err);
+      }
+
+      if (tv && tv.verdict === "pass") {
+        console.log(`[QA-AutoJudge] trajectory judge PASS (score=${tv.score})`);
+        handlePassVerdict(job, cycleInfo);
+        return;
+      }
+      if (tv && tv.verdict === "fail") {
+        console.log(
+          `[QA-AutoJudge] trajectory judge FAIL (score=${tv.score}): ${tv.reasons.join("; ").slice(0, 300)}`,
+        );
+        handleFailVerdict(job, cycleInfo);
+        return;
+      }
+
+      // null 또는 unclear → 기존 불명확 메시지 유지
+      const firstLine = job.request.split("\n")[0].trim().slice(0, 80).replace(/`/g, "'");
+      addGenieMessage(
+        `[자동 판정] ⚠️ QA 판정 불명확 — 사용자 확인 필요. (trajectory judge도 불명확)\n작업: \`${firstLine}\``,
+      );
+    })();
+    return;
+  }
+
+  // verdict === "fail"
+  handleFailVerdict(job, cycleInfo);
+}
+
+/** FAIL 처리 — 에스컬레이션 또는 핫픽스 위임 + 재검증 큐 (regex/trajectory 양쪽 경로에서 공용) */
+function handleFailVerdict(job: Job, cycleInfo: CycleInfo | null): void {
+  const cycleId = cycleInfo?.cycleId ?? randomUUID();
+  const newFailCount = (cycleInfo?.failCount ?? 0) + 1;
+  activeCycles.set(cycleId, newFailCount);
+
+  // 3회 연속 FAIL → 에스컬레이션 + 사이클 중단
+  if (newFailCount >= MAX_FAILS) {
+    activeCycles.delete(cycleId);
+    const firstLine = job.request.split("\n")[0].trim().slice(0, 80).replace(/`/g, "'");
+    addGenieMessage(
+      `[자동 판정] 🚨 QA ${MAX_FAILS}회 연속 FAIL — 자동 핫픽스를 중단합니다. 사용자 직접 확인 필요.\n작업: \`${firstLine}\``,
+    );
+    return;
+  }
+
+  // 핫픽스 위임 에이전트 결정
+  const hotfixAgentId = inferHotfixAgent(job);
+  const hotfixAgentDef = getWorkerAgent(hotfixAgentId);
+  const hotfixAgentName = hotfixAgentDef?.name ?? hotfixAgentId;
+  const isSelf = isSelfProject(job.projectName);
+
+  // QA 로그 마지막 20줄 (2000자 cap) 추출
+  const qaReport = job.logs.slice(-20).join("\n").slice(0, 2000);
+  const origRequestPreview = job.request.slice(0, 500);
+
+  const hotfixRequest =
+    `[QA 자동 판정 FAIL — 핫픽스 요청 #${newFailCount}]\n` +
+    `QA 검증 결과 FAIL. 아래 QA 결과를 확인하고 핫픽스를 진행해주세요.\n\n` +
+    `## 원본 QA 요청\n${origRequestPreview}\n\n` +
+    `## QA 결과 요약\n${qaReport}\n\n` +
+    `5단 보고 필수. selfRestart=${isSelf}.\n` +
+    `<!--QA_AUTO_CYCLE:${cycleId}:${newFailCount}-->`;
+
+  const reCheckRequest =
+    `[QA 자동 재검증 #${newFailCount} — ${hotfixAgentName} 핫픽스 후]\n` +
+    `${hotfixAgentName}가 핫픽스를 완료했습니다. 직전 FAIL 항목이 수정됐는지 재검증해주세요.\n\n` +
+    `## 원본 QA 대상\n${origRequestPreview}\n\n` +
+    `5단 QA 보고 필수 (발견된 문제/검증 항목/종합 판정).\n` +
+    `<!--QA_AUTO_CYCLE:${cycleId}:${newFailCount}-->`;
+
+  // dynamic import — jobs.ts ↔ qa-auto-judge.ts 순환 참조 방지
+  void (async () => {
+    try {
+      const { createJob } = await import("./jobs.js");
+      const hotfixJob = createJob(
+        hotfixRequest,
+        job.projectName,
+        undefined,       // attachments
+        hotfixAgentId,
+        job.cwd,
+        "high",
+        undefined,       // afterJobId
+        isSelf,          // selfRestart
+      );
+
+      createJob(
+        reCheckRequest,
+        job.projectName,
+        undefined,
+        "qa",
+        job.cwd,
+        "normal",
+        hotfixJob.id,    // afterJobId: 핫픽스 완료 후 자동 실행
+        false,
+      );
+
+      console.log(
+        `[QA-AutoJudge] FAIL #${newFailCount} → 핫픽스: ${hotfixAgentId} (${hotfixJob.id.slice(0, 8)}), ` +
+        `재검증 예약 (cycleId=${cycleId.slice(0, 8)})`,
+      );
+    } catch (err) {
+      console.error("[QA-AutoJudge] 핫픽스/재검증 잡 생성 실패:", err);
+    }
+  })();
+}

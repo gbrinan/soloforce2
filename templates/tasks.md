@@ -1,0 +1,52 @@
+# Tasks: 기능명
+
+<!-- 기능의 한국어 이름을 제목에 포함합니다. -->
+
+## Goal
+
+<!-- 명확한 최종 목표를 작성합니다. -->
+
+## Current Phase
+
+<!-- 현재 진행 중인 단계를 표시합니다. 이모지: 🔄 진행 중, ✅ 완료, ⏸️ 대기 -->
+
+🔄 Phase 1: Requirements & Discovery
+
+## Phases
+
+<!-- 각 단계의 작업을 체크박스로 관리합니다. -->
+
+### Phase 1: Requirements & Discovery 🔄
+
+- [ ] 요구사항 정의
+- [ ] 기존 코드 분석
+- [ ] 스펙 문서 작성 (spec.md)
+- [ ] 스펙 리뷰 및 승인
+
+### Phase 2: Planning & Structure ⏸️
+
+- [ ] 구현 계획 작성 (plan.md)
+- [ ] 기존 코드 상세 분석
+- [ ] 관련 클래스/메서드 존재 여부 확인
+
+### Phase 3: Implementation ⏸️
+
+- [ ] UI Layer 구현
+- [ ] Application Layer 구현
+- [ ] Domain Layer 구현
+- [ ] Infrastructure Layer 구현 (필요시)
+- [ ] 단계별 컴파일 검증
+
+### Phase 4: Testing ⏸️
+
+- [ ] 전체 빌드 확인
+- [ ] 전체 테스트 통과 확인
+- [ ] 수동 테스트 (가능한 경우)
+
+## Notes
+
+<!-- 필요시 추가 항목을 덧붙입니다. -->
+
+- 진행할 때마다 Phase 상태를 업데이트하세요: ⏸️ 대기 → 🔄 진행 중 → ✅ 완료
+- 결정 사항은 findings.md의 Technical Decisions에 기록하세요.
+- 오류는 findings.md의 Issues Encountered에 기록하세요.
