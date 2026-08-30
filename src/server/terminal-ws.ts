@@ -21,6 +21,7 @@ import { safeChildEnv } from "./utils/safeChildEnv.js";
 import { verifyApprovalToken } from "./approval-auth.js";
 import { getGenieSessionInfo, buildSessionContext, setGenieSessionId, addGenieMessage, sendMessage, getGenieName } from "./chat.js";
 import { getGenieAgent } from "../agents/genie.js";
+import { effortForConfig } from "./effort-policy.js";
 import { buildPermissionArgs } from "../agent.js";
 import { resolveAgentMcpServers } from "./mcp-registry.js";
 import { listManifests } from "./app-registry.js";
@@ -146,9 +147,13 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
   const cliArgs = ["--no-chrome", "--strict-mcp-config", "--mcp-config", mcpConfigPath];
   if (genieConfig.model) {
     cliArgs.push("--model", genieConfig.model);
-  if (genieConfig.effort) cliArgs.push("--effort", genieConfig.effort);
     console.log(`[Terminal] model: ${genieConfig.model}`);
   }
+  // effort는 model 유무와 무관하다. 2026-08-18 이전엔 이 줄이 위 if 블록 안에 들여쓰여 있어
+  // genie model이 null이면 --effort가 조용히 사라졌다. 블록 밖으로 꺼내고 기본값을 붙인다.
+  const genieEffort = effortForConfig(genieConfig.effort);
+  cliArgs.push("--effort", genieEffort);
+  console.log(`[Terminal] effort: ${genieEffort}`);
   // 도구 권한 — 내장 Read/Write/Edit/Bash 차단, SafeFS MCP 강제.
   // interactive: bypass 경고 프롬프트를 피하려 default 모드 사용
   // 할당된 MCP 서버: approval 모드 → PreToolUse 훅(승인카드) / allow 모드 → allowedTools

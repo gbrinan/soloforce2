@@ -31,6 +31,7 @@ import { loadTodos, startTodoReconcile } from "./todos.js";
 import { loadSchedules } from "./schedules.js";
 import { startSchedulesNotifier, stopSchedulesNotifier } from "./schedules-notifier.js";
 import { startAnandaraSync, stopAnandaraSync } from "./anandara-sync.js";
+import { startAnandaraProjectSync, stopAnandaraProjectSync } from "./anandara-projects.js";
 import { loadNotifications } from "./notifications.js";
 import { loadHumanChat } from "./human-chat.js";
 import { loadWorkflowApprovals } from "./workflow-approvals.js";
@@ -130,6 +131,8 @@ export function startServer(port = 3456): void {
       loadWorkflowApprovals();
       startSchedulesNotifier();
       startAnandaraSync(); // 아난다라 교육 → MyCrew 일정 단방향 동기화 (30분 주기)
+      startAnandaraProjectSync(); // 아난다라 교육 → mycrew-works/education/<고객사> 프로젝트 폴더 (일 1회)
+      void import("./mail-scan.js").then((m) => m.startMailScan()); // 메일 인박스 → 교육·업무 의뢰 다이제스트 (09:00/17:00 KST)
       startPartnerRequestSweep();
       startTunnelManager();
       // 루프 엔진 부팅 시 orphan(고아) 실행 복구 — 서버가 루프 실행 도중 재시작/크래시되면
@@ -200,6 +203,7 @@ export function startServer(port = 3456): void {
     stopScheduler();
     stopSchedulesNotifier();
     stopAnandaraSync();
+    stopAnandaraProjectSync();
     stopPartnerRequestSweep();
     stopTelegramBridge();
     stopDiscordBridge();

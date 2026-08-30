@@ -20,6 +20,11 @@ export interface AgentConfig {
   bashSensitivePatterns?: string[];
   maxCacheTokens?: number;
   model?: string | null;
+  /**
+   * 계획 단계(runPlanApprovalGate)에서만 쓸 모델. 미지정이면 model 을 그대로 쓴다(기존 동작 불변).
+   * runWorkerAgent 가 worker-stage-model.ts 로 계산해 주입한다.
+   */
+  planModel?: string | null;
   // CLI --effort 수준 (low|medium|high). 미지정 시 CLI 기본.
   effort?: string | null;
   enablePlaywright?: boolean;
@@ -109,6 +114,12 @@ export interface Job {
   // 자동 회수용 baseline: lease 시작 시점 outputs/{agent}/ 파일명 → mtime(epoch ms) 스냅샷.
   // checkExpiredLeases에서 baseline 대비 신규/갱신 파일이 있으면 status=completed로 자동 회수.
   outputsBaseline?: Record<string, number>;
+  /**
+   * lease 획득 시점의 «코드 파일 미커밋 변경» 경로 집합. 잡 종료 시 다시 찍어 차집합을 내면
+   * 「이 잡이 실제로 코드를 바꿨는가」가 나온다. 자동 QA 발동 판정의 주 신호.
+   * undefined = 판정 불가(git 없음/실패) → 안전측으로 QA 를 수행한다.
+   */
+  codeBaseline?: string[];
   // 자식 claude CLI PID. lease 만료 + 자동 회수 불가 시 SIGKILL 대상.
   // 부팅 시 stale 처리 (loadJobs에서 undefined로 클리어 — 자식은 부모와 함께 죽음).
   childPid?: number;
@@ -154,6 +165,14 @@ export interface Job {
   model?: string | null;
   // CLI --effort 수준 (low|medium|high). 미지정 시 CLI 기본.
   effort?: string | null;
+  /**
+   * 상류(Anthropic) 세션/사용 한도로 잡을 지연시킨 재개 시각 (epoch ms).
+   * 설정되면 status는 `queued`로 되돌아가고, processQueue가 이 시각 전에는 잡을 집지 않는다.
+   * 한도 소진은 작업 결함이 아니라 재시도 대상이라 `failed`로 종결하지 않는다 (upstream-limit.ts 참조).
+   */
+  deferredUntilMs?: number;
+  /** 한도로 지연된 누적 횟수. MAX_DEFERRALS 초과 시 기존대로 failed로 종결 (무한 순환 방지). */
+  deferCount?: number;
   /** 재시도 중 모델 티어 자동 승격이 이미 적용됐는지 — job당 1회 상한(무한 승격 방지)을 위한 플래그. */
   escalatedTier?: boolean;
   /** 승격 전 모델 ID (지표 기록·로그 표시용, escalatedTier=true일 때만 값 존재). */

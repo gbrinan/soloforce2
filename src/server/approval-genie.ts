@@ -82,6 +82,10 @@ export async function spawnGenieOpinion(req: ApprovalRequest): Promise<void> {
     }
     const taskId = `approval-${req.id.slice(0, 8)}`;
     const result = await runAgent(getGenieAgent(), taskId, buildOpinionPrompt(req), {});
+    if (result.cost) {
+      const { logCost } = await import("./jobs.js");
+      logCost("genie", undefined, result.cost, "genie:approval-opinion");
+    }
     if (!result.success) {
       console.warn(`[Approval] 마이크루 의견 spawn 실패: ${result.error}`);
       return;

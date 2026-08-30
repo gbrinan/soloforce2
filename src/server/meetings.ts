@@ -845,7 +845,7 @@ ${transcript.slice(0, 60000)}
     cacheReadTokens: r.usage?.cacheReadTokens ?? 0,
     cacheCreateTokens: r.usage?.cacheCreateTokens ?? 0,
     durationMs: r.durationMs ?? 0,
-  });
+  }, "app:meetings:summary");
   return parseSummaryJson(r.text);
 }
 

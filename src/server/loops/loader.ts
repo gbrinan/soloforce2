@@ -72,6 +72,7 @@ function validateStep(step: unknown, index: number): { ok: true; step: LoopStep 
       done_condition: s.done_condition as LoopStep["done_condition"],
       max_iterations: maxIterations,
       no_progress_after: typeof s.no_progress_after === "number" ? s.no_progress_after : undefined,
+      skip_output: typeof s.skip_output === "boolean" ? s.skip_output : undefined,
     },
   };
 }

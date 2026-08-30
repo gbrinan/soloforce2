@@ -15,11 +15,12 @@ import { join } from "node:path";
 import { runAgent, type RunAgentOptions } from "../agent.js";
 import { getGenieAgent } from "../agents/genie.js";
 import { withAgentLock } from "./agent-lock.js";
-import { createJob, emitGlobalEvent, getBusyAgentIds, getAllJobs, getAgentCurrentJob, buildOrgChart, checkStaffChange, saveStaffHash, logCost } from "./jobs.js";
+import { createJob, emitGlobalEvent, getBusyAgentIds, getAllJobs, getAgentCurrentJob, buildOrgChart, checkStaffChange, saveStaffHash, logCost, cacheCapExceeded } from "./jobs.js";
 import { clearPmSession, savePmSessionTokens, normalizePageName, PROTECTED_PAGE_NAMES, PROTECTED_PAGE_PREFIXES, JUNK_PAGES, JUNK_CONTENTS } from "./pm-memory.js";
 import { getAllWorkerAgents, getWorkerAgent } from "../agent-registry.js";
 import { HISTORY_DIR as ROOT_HISTORY_DIR, PROJECT_SELF_DIR, getTodayKST, kstDaysAgo, TSX_BIN, TSX_CLI_ARGS } from "../config.js";
-import { archiveWikiPage, archiveChatMessage } from "./audit.js";
+import { safeKill } from "./utils/platform.js";
+import { archiveWikiPage, archiveChatMessage, auditLog } from "./audit.js";
 import { addTodo, markTodoDone, cancelTodo, deleteTodo, linkJobToTodo, setTodoState, setTodoStages, getTodos } from "./todos.js";
 import { createSchedule, updateSchedule, deleteSchedule } from "./schedules.js";
 import type { GenieTodo, AgentResult } from "../types.js";
@@ -30,6 +31,8 @@ import { getUserTitle } from "./user-title.js";
 import { claudeSessionExists } from "./agent-pty.js";
 import { isSelectiveRecallEnabled, getRecallBudgetChars, buildWikiIndex, buildToc, formatToc, recallRelevant } from "./memory/recall.js";
 import { resolveTier } from "./model-tiers.js";
+import { modelForInternalSource } from "./internal-source-tier.js";
+import { resolveGenieSource } from "./cost-entry.js";
 
 // 침묵 catch 관측 훅 — 예상된 부재(ENOENT)는 무시, 그 외는 warn.
 // (플랫폼 분석 2026-07-04 P0: 빈 catch 26곳이 대화 유실을 은폐하던 문제)
@@ -167,10 +170,8 @@ export function getGenieTurnId(): string {
 
 // 자동 진행 모드 (작업 완료 시 마이크루가 자동으로 다음 단계 이어감)
 let autoContinuationMode = false;
-// 경량 내부 알림 콜용 저비용 모델 + 대상 source (완료 알림·스케줄 알림 — 응답 대부분 무응답/한 줄)
-// 2026-07-17: sonnet-4-6 지원 종료 → 경량 알림 용도에 맞게 haiku로 (진짜 저비용 티어)
-const LIGHT_INTERNAL_MODEL = "claude-haiku-4-5";
-const LIGHT_INTERNAL_SOURCES = new Set(["job:notify:ok", "scheduler:notify", "scheduler:state-change"]);
+// 내부 발화 source → 모델 티어 고정표는 internal-source-tier.ts 로 분리했다(2026-08-22).
+// 2단(haiku / 기본) → 3단(cheap / standard / 기본)으로 확장. 표와 티어 어휘는 그 모듈 참조.
 
 let autoContinuationCount = 0;
 const MAX_AUTO_CONTINUATIONS = 20;
@@ -265,56 +266,23 @@ async function tryAutoRestart(reason: string, nextPrompt: string): Promise<boole
     return false;
   }
   console.log(`[AutoMode] 자동 RESTART 시도: ${reason}`);
-  // 라이브 서버 포트(.env PORT=3457)와 충돌하면 dry-run이 라이브를 kill·점유해
-  // 앱이 검증 모드로 묶이거나 재기동이 EADDRINUSE로 실패한다. 전용 포트 사용.
-  const testPort = 3897;
-  let testServerSpawned = false;
   try {
-    // tsc/vite는 cold cache·대형 deps에서 30s를 넘기는 경우가 흔해 timeout을 늘린다.
-    const tscResult = await execBashForRestart("npx tsc --noEmit", 180000);
-    if (tscResult.includes("error TS")) {
-      console.error("[AutoMode] 자동 RESTART 취소 — tsc 에러");
-      return false;
-    }
-    // 클라이언트 빌드
-    try {
-      await execBashForRestart("npx vite build --config src/client/vite.config.ts", 180000);
-      console.log("[AutoMode] 클라이언트 빌드 완료");
-    } catch {
-      console.error("[AutoMode] 자동 RESTART 취소 — 클라이언트 빌드 실패");
-      return false;
-    }
-    await execBashForRestart(`lsof -ti:${testPort} | xargs kill 2>/dev/null || true`);
-    const dryRunLog = join(PROJECT_SELF_DIR, "history", `.dry-run-${testPort}.log`);
-    await spawnDryRunTestServer(testPort, dryRunLog);
-    testServerSpawned = true;
-    let healthOk = false;
-    for (let i = 0; i < 8; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        const health = await execBashForRestart(`curl -sf http://localhost:${testPort}/api/staff`);
-        JSON.parse(health);
-        healthOk = true;
-        break;
-      } catch (err) { swallow("아직 준비 안 됨", err); }
-    }
-    if (!healthOk) {
-      console.error("[AutoMode] 자동 RESTART 취소 — 임시 서버 검증 실패");
+    const gate = await runRestartSafetyGate();
+    if (!gate.ok) {
+      // 침묵 취소 금지 — 어디서 막혔는지 남긴다(이 로그 부재가 D-3 훅 미반영을 오래 감췄다).
+      console.error(`[AutoMode] 자동 RESTART 취소 — ${gate.stage}: ${gate.detail}`);
+      addGenieMessage(`⚠️ 자동 재시작 취소됨 (${gate.stage}): ${gate.detail.slice(0, 200)}`, { internal: true });
       return false;
     }
     // 부팅 후 handleSelfRestart가 자동 sendMessage 재발화 (기존 인프라)
     addTodo("genie", `[재시작 후 이어가기] ${nextPrompt.slice(0, 500)}`);
-    console.log("[AutoMode] 자동 RESTART 검증 통과 — 재시작 진행");
+    console.log(`[AutoMode] 자동 RESTART 검증 통과 (${gate.detail}) — 재시작 진행`);
     const { restartSelf } = await import("./jobs.js");
     setTimeout(() => restartSelf().catch((e: unknown) => console.error("[AutoMode] restartSelf 실패:", e)), 500);
     return true;
   } catch (err) {
     console.error("[AutoMode] 자동 RESTART 검증 실패:", err);
     return false;
-  } finally {
-    if (testServerSpawned) {
-      await execBashForRestart(`lsof -ti:${testPort} | xargs kill 2>/dev/null || true`).catch(() => { /* */ });
-    }
   }
 }
 
@@ -456,18 +424,88 @@ const RESET_RE = () => /^\s*<!--\s*RESET\s*:\s*(.*?)\s*-->\s*$/gim;
 const RESTART_RE = () => /^\s*<!--\s*RESTART\s*-->\s*$/gim;
 
 
-async function execBashForRestart(cmd: string, timeoutMs = 30000): Promise<string> {
+// ── 재시작 안전 검증 (공용) ──────────────────────────────────────────
+// [핫픽스 2026-08-08] 이 게이트는 원래 bash·npx·curl·lsof에 기대고 있었다.
+// 이 머신엔 bash가 없어서 execFile("bash", ...)가 항상 실패했는데, 옛 헬퍼는 실패를
+// reject가 아니라 "[에러] ..." 문자열로 resolve했다. 그 결과:
+//   · tsc 게이트  — "[에러] ..."에 'error TS'가 없어 통과로 읽힘(침묵 통과)
+//   · vite 게이트 — 예외가 아니라 정상 resolve라 catch에 들어가지 않음(침묵 통과)
+//   · health 게이트 — curl 출력이 JSON이 아니라 JSON.parse가 터져 healthOk가 영원히 false
+// 즉 검증이 아니라 '항상 취소'였고, self 코드 변경이 전부 미반영으로 남았다(D-3 훅 404).
+// 이제 셸을 거치지 않는다: node 진입점 직접 실행 + 내장 fetch + PID 종료.
+// 검증을 느슨하게 만든 게 아니라, 같은 검증을 실제로 수행되게 옮긴 것이다.
+
+/** node로 로컬 CLI를 직접 실행한다(셸·PATH 비의존). ok=false면 진짜 실패다. */
+async function runNodeTool(args: string[], timeoutMs: number): Promise<{ ok: boolean; out: string }> {
   const { execFile } = await import("node:child_process");
   return new Promise((resolve) => {
-    execFile("bash", ["-c", cmd], {
+    execFile(process.execPath, args, {
       cwd: PROJECT_SELF_DIR,
       maxBuffer: 5 * 1024 * 1024,
       timeout: timeoutMs,
     }, (error, stdout, stderr) => {
-      if (error) resolve(`[에러] ${stderr || error.message}`);
-      else resolve(stdout || "(완료)");
+      const out = `${stdout || ""}${stderr || ""}`.trim();
+      resolve({ ok: !error, out: out || (error ? error.message : "") });
     });
   });
+}
+
+/** OS가 비어 있다고 알려준 포트를 쓴다 — 고정 포트 + lsof 조합이 남기던 유령 인스턴스 오탐 제거. */
+async function findFreePort(): Promise<number> {
+  const net = await import("node:net");
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() => (port ? resolve(port) : reject(new Error("빈 포트 확보 실패"))));
+    });
+  });
+}
+
+type RestartGateStage = "tsc" | "client-build" | "health" | "passed";
+interface RestartGateResult { ok: boolean; stage: RestartGateStage; detail: string }
+
+/**
+ * 재시작 전 안전 검증: tsc → 클라이언트 빌드 → 임시 서버 health.
+ * 실패하면 어느 단계에서 왜 막혔는지 stage/detail로 돌려준다 — 침묵 취소를 만들지 않는다.
+ */
+async function runRestartSafetyGate(): Promise<RestartGateResult> {
+  const tsc = await runNodeTool([join("node_modules", "typescript", "bin", "tsc"), "--noEmit"], 180_000);
+  if (!tsc.ok || /error TS\d+/.test(tsc.out)) {
+    return { ok: false, stage: "tsc", detail: tsc.out.slice(0, 400) || "tsc 실행 실패" };
+  }
+  const build = await runNodeTool(
+    [join("node_modules", "vite", "bin", "vite.js"), "build", "--config", "src/client/vite.config.ts"],
+    180_000,
+  );
+  if (!build.ok) return { ok: false, stage: "client-build", detail: build.out.slice(0, 400) || "vite build 실행 실패" };
+
+  let port: number;
+  try {
+    port = await findFreePort();
+  } catch (err) {
+    return { ok: false, stage: "health", detail: `임시 포트 확보 실패: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  const dryRunLog = join(PROJECT_SELF_DIR, "history", `.dry-run-${port}.log`);
+  let pid = -1;
+  try {
+    pid = await spawnDryRunTestServer(port, dryRunLog);
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/staff`, { signal: AbortSignal.timeout(3000) });
+        if (!res.ok) continue;
+        await res.json();
+        return { ok: true, stage: "passed", detail: `임시 서버 :${port} health OK` };
+      } catch (err) { swallow("임시 서버 아직 준비 안 됨", err); }
+    }
+    return { ok: false, stage: "health", detail: `임시 서버 :${port} health 실패 — 로그: ${dryRunLog}` };
+  } finally {
+    if (pid > 0) safeKill(pid, "SIGTERM");
+  }
 }
 
 // 임시(dry-run) 서버를 진짜 detached + stdio:ignore 로 띄운다.
@@ -844,6 +882,7 @@ async function flushSessionMemory(): Promise<void> {
       "flush",
       `세션이 만료됩니다. 아래 최근 대화에서 중요한 정보를 WIKI 태그로 저장하세요.\n\n${formatted}`,
     );
+    if (result.cost) logCost("genie", undefined, result.cost, "genie:flush-memory");
 
     if (result.success && result.output) {
       // WIKI 태그 파싱하여 저장
@@ -928,6 +967,7 @@ async function generateDailySummaries(): Promise<void> {
         `summary-${date}`,
         `다음은 ${date}의 대화 기록입니다. 핵심 내용만 간결하게 요약해주세요.\n\n${convContent.slice(0, 8000)}`,
       );
+      if (result.cost) logCost("genie", undefined, result.cost, "genie:daily-summary");
 
       if (result.success && result.output) {
         writeFileSync(summaryPath, `# ${date} 대화 요약\n\n${result.output}\n`);
@@ -1062,6 +1102,7 @@ async function refreshTodaySummary(today: string, convPath: string, mtime: numbe
       `today-summary-${today}`,
       `다음은 오늘(${today}) 대화 기록입니다. 핵심 내용만 간결하게 요약해주세요.\n\n${content.slice(0, 12000)}`,
     );
+    if (result.cost) logCost("genie", undefined, result.cost, "genie:today-summary");
     if (result.success && result.output) {
       todaySummaryCache = { date: today, mtime, summary: result.output };
       console.log(`[MyCrew] 오늘 대화 요약 생성 완료 (${result.output.length}자)`);
@@ -1134,6 +1175,7 @@ export async function runLibrarian(): Promise<void> {
       "librarian",
       `위키 정리가 필요합니다. (${reason})\n\n${wikiContent}`,
     );
+    if (result.cost) logCost("genie", undefined, result.cost, "genie:librarian");
 
     let archivedCount = 0;
     let updatedCount = 0;
@@ -1229,6 +1271,7 @@ export async function runWorkerLibrarian(agentId?: string): Promise<void> {
     };
 
     const result = await runAgent(config, `librarian-${agent.id}`, `${agent.name} 위키 정리 (${files.length}개 → ${MAX_WIKI_PAGES}개 이하)\n\n${wikiContent}`);
+    if (result.cost) logCost(agent.id, undefined, result.cost, "worker:librarian");
     if (!result.success || !result.output) continue;
 
     let archived = 0;
@@ -1830,6 +1873,10 @@ export async function runGenieAgent(
       sessionId = result.sessionId;
       saveSession();
     }
+    // ★ 2026-08-23 신설 — 이 래퍼를 타는 호출(jobs.ts 의 verify·plan-review-N)은
+    //   여태 cost-log 에 한 행도 남지 않았다. 계획 심사 비용이 통째로 장부 밖이었다.
+    //   총액이 오르는 게 아니라 «보이게» 되는 것이다.
+    if (result.cost) logCost("genie", undefined, result.cost, `genie:${taskId}`);
     return result;
   });
 }
@@ -2095,10 +2142,14 @@ ${tagSection}`;
     }
   };
 
-  // 경량 내부 알림 콜(단순 안내성 — 판단 비중 낮음)은 저비용 모델로 처리.
-  // 실패 후속 판단(job:notify:fail)·자동 진행·job:report(사용자 보고문 생성)는 기본 모델 유지.
-  const lightModel = isInternal && options?.source && LIGHT_INTERNAL_SOURCES.has(options.source)
-    ? LIGHT_INTERNAL_MODEL : undefined;
+  // 내부 발화는 source 별로 모델 티어를 고정한다(internal-source-tier.ts).
+  // cheap: 단순 안내성(job:notify:ok·scheduler:notify·scheduler:state-change)
+  // standard: 정형이지만 후속 판단이 필요한 발화(job:notify:fail·loop:runner·scheduler:trigger·task:report)
+  // 표에 없는 source(job:report·사용자 채팅)는 undefined → 기본 모델 유지.
+  const lightModel = modelForInternalSource(isInternal, options?.source);
+  // 원장(cost-log)에 남길 발화 출처. 모델 티어와 «같은 값»을 쓴다 —
+  // 두 곳이 다른 어휘를 쓰면 "모델은 haiku 인데 태그는 다른 이름"이 된다.
+  const genieCostSource = resolveGenieSource(isInternal, options?.source);
 
   setGenieBusy(true, message.slice(0, 80));
   // 세션 충돌 예방(2026-07-13): 터미널 PTY가 부팅 eager-spawn 등으로 같은 세션을 점유하고
@@ -2212,6 +2263,9 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
     midResetContext = buildMidResetContext();
     sessionId = undefined;
     saveSession();
+    // ★ 덮어쓰기 전에 1차 시도 비용을 원장에 남긴다. 아래 재할당 후에는 2291 이
+    //   «마지막 result» 만 보므로 실패한 1차 시도분이 조용히 사라진다(2026-08-23 시정).
+    if (result.cost) logCost("genie", undefined, result.cost, `${genieCostSource}:attempt1`);
     result = await runAgent(getGenieAgent(), "chat", prompt, {
       // 새 세션 — resume 없음. midResetContext가 prompt에 이미 반영되진 않으므로 직접 앞에 덧댐.
       model: lightModel,
@@ -2249,8 +2303,10 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
   }
 
   // 마이크루 비용 로깅 + 세션 토큰 추적
+  // source: 이 발화가 «아난의 입력»인지 «시스템 자동 발화»인지 «잡 결과 처리»인지를
+  //         원장에 남긴다. 이게 없어서 genie 행이 전부 한 덩어리였다(2026-08-23 시정).
   if (result.cost) {
-    logCost("genie", undefined, result.cost);
+    logCost("genie", undefined, result.cost, genieCostSource);
     if (result.cost.cacheReadTokens) {
       try {
         const sd = existsSync(SESSION_FILE) ? JSON.parse(readFileSync(SESSION_FILE, "utf-8")) : {};
@@ -2265,8 +2321,9 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
   const genieMaxCache = getGenieAgent().maxCacheTokens ?? 0;
   if (genieMaxCache > 0 && result.cost?.cacheReadTokens) {
     lastGenieCacheTokens = result.cost.cacheReadTokens;
-    if (lastGenieCacheTokens > genieMaxCache && sessionId) {
+    if (cacheCapExceeded(lastGenieCacheTokens, genieMaxCache) && sessionId) {
       console.log(`[MyCrew] 캐시 토큰 임계 초과 (${(lastGenieCacheTokens / 1_000_000).toFixed(1)}M > ${genieMaxCache / 1_000_000}M) → 다음 메시지에서 세션 리셋 예정`);
+      auditLog("cache.reset", { agentId: "genie", cacheReadTokens: lastGenieCacheTokens, capTokens: genieMaxCache, path: "genie" });
       midResetContext = buildMidResetContext();
       sessionId = undefined;
       saveSession();
@@ -2487,68 +2544,32 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
     } else {
       console.log("[MyCrew] 재시작 요청 감지 — 안전 검증 시작");
       addGenieMessage("⏳ 안전 검증 중... (tsc → 빌드 → 임시 서버 테스트)");
-      // 라이브 서버 포트(.env PORT=3457)와 충돌하면 dry-run이 라이브를 kill·점유해
-      // 앱이 검증 모드로 묶이거나 재기동이 EADDRINUSE로 실패한다. 전용 포트 사용.
-      const testPort = 3897;
-      let testServerSpawned = false;
       try {
-        // tsc/vite는 cold cache·대형 deps에서 30s를 넘기는 경우가 흔해 timeout을 늘린다.
-        const tscResult = await execBashForRestart("npx tsc --noEmit", 180000);
-        if (tscResult.includes("error TS")) {
-          console.error("[MyCrew] 재시작 취소 — tsc 에러");
-          addGenieMessage("⚠️ 재시작 취소됨: 타입 에러가 있습니다.");
+        const gate = await runRestartSafetyGate();
+        if (!gate.ok) {
+          const label = gate.stage === "tsc" ? "타입 에러"
+            : gate.stage === "client-build" ? "클라이언트 빌드 에러"
+            : "임시 서버 검증 실패";
+          console.error(`[MyCrew] 재시작 취소 — ${gate.stage}: ${gate.detail}`);
+          addGenieMessage(`⚠️ 재시작 취소됨: ${label}.\n${gate.detail.slice(0, 300)}`);
         } else {
-          let clientBuildOk = true;
-          try {
-            await execBashForRestart("npx vite build --config src/client/vite.config.ts", 180000);
-            console.log("[MyCrew] 클라이언트 빌드 완료");
-          } catch {
-            clientBuildOk = false;
-            console.error("[MyCrew] 재시작 취소 — 클라이언트 빌드 실패");
-            addGenieMessage("⚠️ 재시작 취소됨: 클라이언트 빌드 에러가 있습니다.");
+          console.log(`[MyCrew] 임시 서버 검증 통과 (${gate.detail}) — 재시작 진행`);
+          // UI에 진행 신호 — 사장님이 "안전 검증 중"에서 멈춘 줄 알지 않도록.
+          addGenieMessage("✅ 안전 검증 통과 — 서버를 재시작합니다.");
+          // 재시작 전: 마이크루 응답에 후속 작업 언급이 있으면 TODO 자동 등록
+          // 부팅 후 handleSelfRestart가 첫 항목을 sendMessage로 재발화, 나머지는 done 처리
+          const restartContent = content.replace(/<!--.*?-->/gs, "").trim();
+          if (restartContent.length > 10) {
+            const summary = restartContent.slice(0, 200).replace(/\n/g, " ");
+            addTodo("genie", `[재시작 후 이어가기] ${summary}`);
+            console.log("[MyCrew] 재시작 전 후속 작업 TODO 등록");
           }
-          if (clientBuildOk) {
-          await execBashForRestart(`lsof -ti:${testPort} | xargs kill 2>/dev/null || true`);
-          const dryRunLog = join(PROJECT_SELF_DIR, "history", `.dry-run-${testPort}.log`);
-          await spawnDryRunTestServer(testPort, dryRunLog);
-          testServerSpawned = true;
-          let healthOk = false;
-          for (let i = 0; i < 8; i++) {
-            await new Promise((r) => setTimeout(r, 2000));
-            try {
-              const health = await execBashForRestart(`curl -sf http://localhost:${testPort}/api/staff`);
-              JSON.parse(health);
-              healthOk = true;
-              break;
-            } catch (err) { swallow("아직 준비 안 됨", err); }
-          }
-          if (healthOk) {
-            console.log("[MyCrew] 임시 서버 검증 통과 — 재시작 진행");
-            // UI에 진행 신호 — 사장님이 "안전 검증 중"에서 멈춘 줄 알지 않도록.
-            addGenieMessage("✅ 안전 검증 통과 — 서버를 재시작합니다.");
-            // 재시작 전: 마이크루 응답에 후속 작업 언급이 있으면 TODO 자동 등록
-            // 부팅 후 handleSelfRestart가 첫 항목을 sendMessage로 재발화, 나머지는 done 처리
-            const restartContent = content.replace(/<!--.*?-->/gs, "").trim();
-            if (restartContent.length > 10) {
-              const summary = restartContent.slice(0, 200).replace(/\n/g, " ");
-              addTodo("genie", `[재시작 후 이어가기] ${summary}`);
-              console.log("[MyCrew] 재시작 전 후속 작업 TODO 등록");
-            }
-            const { restartSelf } = await import("./jobs.js");
-            setTimeout(() => restartSelf().catch((e: unknown) => console.error("[Self] 재시작 실패:", e)), 1000);
-          } else {
-            console.error("[MyCrew] 재시작 취소 — 임시 서버 검증 실패");
-            addGenieMessage("⚠️ 재시작 취소됨: 임시 서버 검증 실패. 코드에 런타임 에러가 있을 수 있습니다.");
-          }
-          }
+          const { restartSelf } = await import("./jobs.js");
+          setTimeout(() => restartSelf().catch((e: unknown) => console.error("[Self] 재시작 실패:", e)), 1000);
         }
       } catch (e) {
         console.error("[MyCrew] 재시작 검증 실패:", e);
         addGenieMessage("⚠️ 재시작 취소됨: 검증 중 에러 발생.");
-      } finally {
-        if (testServerSpawned) {
-          await execBashForRestart(`lsof -ti:${testPort} | xargs kill 2>/dev/null || true`).catch(() => {});
-        }
       }
       // RESTART 처리 완료 — 정상 응답 흐름 건너뜀 (internal 플래그로 UI 렌더링 방지)
       return { id: randomUUID(), role: "genie", content: "", timestamp: new Date().toISOString(), internal: true };

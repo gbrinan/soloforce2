@@ -24,7 +24,11 @@ hljs.registerLanguage('markdown', markdownLang);
 hljs.registerLanguage('md', markdownLang);
 
 // 산출물 디렉토리 prefix + 알려진 확장자만 클릭 가능 링크로 변환
-const FILE_PATH_RE = /^(?:history\/(?:outputs|external-reports|attachments)|agentTeam|outputs)\/[^\s]+\.(?:md|txt|pptx|xlsx|pdf|csv|json|html)$/;
+// [2026-08-10] 확장자 누락 보강 — jsonl/.posted/ts/yaml/py 등이 빠져 실재 산출물이 링크가 안 됐다.
+//   ^…$ 전체 매칭이라 서버(jobs.ts) 같은 '절단→유령 경로' 피해는 없었고, 미검출만 발생했다.
+//   정본 목록은 src/server/utils/artifact-ext.ts OUTPUT_EXT.
+//   ★ 의도적 중복: 클라이언트 번들은 src/server를 import하지 않는다(경계 유지). 목록 변경 시 양쪽 같이 고칠 것.
+const FILE_PATH_RE = /^(?:history\/(?:outputs|external-reports|attachments)|agentTeam|outputs)\/[^\s]+\.(?:jsonl|json|pptx|xlsx|docx|pdf|csv|mdx|md|txt|yaml|yml|html|htm|css|svg|zip|tsx|ts|jsx|mjs|cjs|js|py|sh|pl|awk|png|jpeg|jpg|gif|webp|webm|mp4)(?:\.posted)?$/;
 
 function escapeHtml(s: string): string {
   return s

@@ -176,6 +176,12 @@ const KNOWN_APPS: { id: string; manifestPaths: string[] }[] = [
     ],
   },
   {
+    id: "projects",
+    manifestPaths: [
+      resolve(process.cwd(), "apps/projects/manifest.json"),
+    ],
+  },
+  {
     id: "anandara",
     manifestPaths: [
       resolve(process.cwd(), "../mycrew-works/anandara/manifest.json"),

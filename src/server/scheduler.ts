@@ -12,7 +12,7 @@ import { checkLoops } from "./loops/index.js";
 import { archiveWikiPage } from "./audit.js";
 import { clearPmSession, PROTECTED_PAGE_NAMES, PROTECTED_PAGE_PREFIXES } from "./pm-memory.js";
 import { HISTORY_DIR, getTodayKST, kstDaysAgo } from "../config.js";
-import { getBusyAgentIds } from "./jobs.js";
+import { getBusyAgentIds, logCost } from "./jobs.js";
 import { getAllWorkerAgents } from "../agent-registry.js";
 import { listInRange, type Schedule } from "./schedules.js";
 import { resolveTier } from "./model-tiers.js";
@@ -634,10 +634,11 @@ async function eventDrivenCheck(state: SchedulerState): Promise<void> {
       // 텔레그램·디스코드 알림 (fire-and-forget) — chat.js와의 순환 import를 피하기 위해 동적 import 사용.
       const summary = job.request.slice(0, 60);
       const agentLabel = job.agent ?? "미지정";
+      const jobIdShort = job.id.slice(0, 8);
       const noticeCategory = job.status === "completed" ? "job-completed" : "job-failed";
       const noticeText = job.status === "completed"
-        ? `📋 작업 완료: ${summary} (담당: ${agentLabel})`
-        : `⚠️ 작업 실패: ${summary} (담당: ${agentLabel})`;
+        ? `[${agentLabel} · ${jobIdShort}] 📋 작업 완료: ${summary}`
+        : `[${agentLabel} · ${jobIdShort}] ⚠️ 작업 실패: ${summary}`;
       import("./telegram.js")
         .then((m) => m.sendTelegramNoticeThrottled(noticeCategory, noticeText))
         .catch(() => {});
@@ -759,6 +760,7 @@ async function generateDailySummaries(): Promise<void> {
     };
 
     const result = await runAgent(config, "daily-summary", `${agent.name}의 ${dateStr} 업무를 요약하세요.\n\n${pages}`);
+    if (result.cost) logCost(agent.id, undefined, result.cost, "worker:daily-summary");
     if (!result.success || !result.output) {
       console.error(`[DailySummary] ${agent.name} 요약 실패`);
       continue;
@@ -812,6 +814,7 @@ async function generateDailySummaries(): Promise<void> {
         };
 
         const result = await runAgent(config, "daily-summary-genie", `${getGenieName()}의 ${dateStr} 업무를 요약하세요.\n\n${pages}`);
+        if (result.cost) logCost("genie", undefined, result.cost, "genie:daily-summary-wiki");
         if (result.success && result.output) {
           if (!existsSync(dailyDir)) mkdirSync(dailyDir, { recursive: true });
           writeFileSync(dailyFile, `# ${getGenieName()} 업무 요약 (${dateStr})\n\n${result.output}`);

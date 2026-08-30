@@ -21,9 +21,14 @@ export type AuditEvent =
   | "job.killed"
   | "job.aborted"
   | "job.activated"
+  // 상류(Anthropic) 세션/사용 한도로 지연 재개 — 실패가 아니라 재시도 대기 (upstream-limit.ts)
+  | "job.deferred"
+  | "job.defer_exhausted"
   | "lease.acquired"
   | "lease.released"
   | "lease.expired"
+  // per-agent maxCacheTokens 초과로 clearPmSession이 발동한 시점 (2026-08-24, 손익분기 기반 상한)
+  | "cache.reset"
   | "plan.proposed"
   | "plan.approved"
   | "plan.rejected"

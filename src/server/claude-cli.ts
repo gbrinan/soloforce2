@@ -8,7 +8,19 @@ import { join } from "node:path";
 import { safeChildEnv } from "./utils/safeChildEnv.js";
 import { safeKill } from "./utils/platform.js";
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+// 실행 파일 해석 — Windows에서 npm 전역 설치는 `claude.cmd`(셸 배치)만 PATH에 올린다.
+// 그런데 아래 호출들은 shell 없이 spawn하므로 .cmd는 ENOENT로 죽는다(installClaudeCli가
+// npm에서 같은 이유로 shell:true를 달아야 했던 그 문제). 프롬프트를 argv로 넘기는 runClaude에
+// shell:true를 쓸 수는 없다 — 따옴표·줄바꿈이 cmd.exe에 재해석돼 프롬프트가 깨진다.
+// 그래서 네이티브 실행 파일을 먼저 찾는다. 못 찾으면 "claude"로 두어 실패가 그대로 드러나게 한다.
+function resolveClaudeBin(): string {
+  if (process.env.CLAUDE_PATH) return process.env.CLAUDE_PATH;
+  if (process.platform === "win32") {
+    const exe = join(homedir(), ".local", "bin", "claude.exe");
+    if (existsSync(exe)) return exe;
+  }
+  return "claude";
+}
 
 export interface ClaudeDetectResult {
   ok: boolean;
@@ -39,7 +51,7 @@ export function detectClaudeCli(timeoutMs = 8_000): Promise<ClaudeDetectResult> 
   return new Promise<ClaudeDetectResult>((resolve) => {
     let proc: ReturnType<typeof spawn>;
     try {
-      proc = spawn(CLAUDE_PATH, ["--version"], { stdio: ["ignore", "pipe", "pipe"], env: safeChildEnv(), windowsHide: true });
+      proc = spawn(resolveClaudeBin(), ["--version"], { stdio: ["ignore", "pipe", "pipe"], env: safeChildEnv(), windowsHide: true });
     } catch (e) {
       resolve({ ok: true, installed: false, error: e instanceof Error ? e.message : String(e) });
       return;
@@ -142,7 +154,7 @@ export function runClaude(prompt: string, system = "", model = "", timeoutMs = 1
   return new Promise<ClaudeRunResult>((resolve) => {
     let proc: ReturnType<typeof spawn>;
     try {
-      proc = spawn(CLAUDE_PATH, args, { stdio: ["ignore", "pipe", "pipe"], env: safeChildEnv(), windowsHide: true });
+      proc = spawn(resolveClaudeBin(), args, { stdio: ["ignore", "pipe", "pipe"], env: safeChildEnv(), windowsHide: true });
     } catch (e) {
       resolve({ ok: false, error: `claude 실행 불가: ${e instanceof Error ? e.message : String(e)}` });
       return;

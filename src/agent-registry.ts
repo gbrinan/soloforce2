@@ -34,6 +34,12 @@ export interface WorkerAgentDef {
   bashSensitivePatterns?: string[];
   maxCacheTokens?: number;
   model?: string | null;
+  /**
+   * 계획 단계에서만 쓸 모델 override. 미지정이면 worker-stage-model.ts의 PLAN_STAGE_MODELS
+   * 표 기본값(현재 dev-pm=claude-opus-5)을 그대로 쓴다 — 이 필드는 그 기본값을 agents.json에서
+   * 갈아끼우는 용도다(예: claude-fable-5). history/agents.json 이 실소스, mtime 캐시로 재시작 불필요.
+   */
+  planModel?: string | null;
   /** v0.1.6 nested runtime schema. flat adapter/model 필드와 병행 — 신규 직원만 사용, 기존 직원은 flat 유지. */
   runtime?: { adapter?: string; model?: string | null; provider?: string; mode?: string };
   interactive?: boolean;
@@ -57,6 +63,37 @@ export function resolveWorkerRuntime(
 
 const AGENTS_FILE = join(HISTORY_DIR, "agents.json");
 const TEMPLATES_DIR = join(PROJECT_SELF_DIR, "config", "system-prompt-templates");
+
+// 15-D 자동등재 직원의 기본 권한 프로파일.
+// 이게 없으면 allowedTools=[] + readPaths/writePaths 미설정 → agent.ts의 hasRead/hasWrite/hasBash가
+// 전부 false → safefs MCP 서버가 아예 부착되지 않는다. 그런데 --disallowedTools(Read,Write,Bash…)는
+// 무조건 전달되므로 "도구를 뺏고 대체재도 안 주는" 상태가 된다(가용 도구 0).
+// 값은 agents.json 등재 직원들의 공통 관행을 그대로 따랐다 — 자기 소유 경로만 쓰기 가능.
+const DEFAULT_AUTO_ALLOWED_TOOLS = [
+  "Read", "Write", "Edit", "Grep", "Glob",
+  "WebSearch", "WebFetch", "Skill",
+  "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+];
+// Bash는 기본 미부여(최소권한). 필요한 직원은 meta.json에 bashCommands를 명시하면 SafeBash가 붙는다.
+
+const DEFAULT_AUTO_READ_SENSITIVE_PATHS = [
+  "/.env", "/.env.*", "/.ssh/**", "/.aws/**", "/.gnupg/**",
+  "/**/id_rsa*", "/**/id_ed25519*", "/**/id_ecdsa*",
+  "/**/*.pem", "/**/*.key", "/**/*.crt", "/**/*.p12", "/**/*.pfx", "/**/*.jks", "/**/*.keychain-db",
+];
+
+const DEFAULT_AUTO_WRITE_SENSITIVE_PATHS = [
+  "/.env",
+  "/history/agents/**/wiki/role-directive.md",
+];
+
+function defaultAutoWritePaths(agentId: string): string[] {
+  return [
+    `/history/outputs/${agentId}/**`,
+    `/history/agents/${agentId}/**`,
+    "/history/attachments/**",
+  ];
+}
 
 let cache: WorkerAgentDef[] | null = null;
 let lastMtime = 0;
@@ -232,9 +269,14 @@ function loadAgents(): WorkerAgentDef[] {
               id?: string; name?: string; jobTitle?: string; team?: string;
               adapter?: string; model?: string; isCore?: boolean; permLevel?: string;
               maxTurns?: number;
+              // 권한 오버라이드 (선택) — 미지정 시 아래 기본 프로파일이 적용된다.
+              allowedTools?: string[]; readPaths?: string[]; writePaths?: string[];
+              bashCommands?: string[]; bashPaths?: string[]; routeKeywords?: string[];
+              maxCacheTokens?: number;
             };
+            const autoId = meta.id ?? agentId;
             agents.push({
-              id: meta.id ?? agentId,
+              id: autoId,
               name: meta.name ?? agentId,
               team: meta.team,
               role: meta.jobTitle,
@@ -242,11 +284,22 @@ function loadAgents(): WorkerAgentDef[] {
               model: meta.model ?? null,
               isCore: meta.isCore ?? false,
               permissionLevel: meta.permLevel,
-              allowedTools: [],
+              // 기본 권한 프로파일 — 미부여 시 safefs 미부착으로 도구 0이 된다(위 상수 주석 참고).
+              // ?? 가 아니라 length 검사인 이유: ?? 는 빈 배열을 통과시킨다. meta.json에
+              // "allowedTools": [] 가 한 줄 들어오면 시드가 통째로 무력화돼 그 직원만 조용히
+              // 도구 0이 된다 — 2026-08-08 자동등재 11명 사고의 재발 경로를 여기서 닫는다.
+              allowedTools: meta.allowedTools?.length ? meta.allowedTools : DEFAULT_AUTO_ALLOWED_TOOLS,
+              readPaths: meta.readPaths?.length ? meta.readPaths : ["/**"],
+              writePaths: meta.writePaths?.length ? meta.writePaths : defaultAutoWritePaths(autoId),
+              bashCommands: meta.bashCommands,
+              bashPaths: meta.bashPaths,
+              readSensitivePaths: DEFAULT_AUTO_READ_SENSITIVE_PATHS,
+              writeSensitivePaths: DEFAULT_AUTO_WRITE_SENSITIVE_PATHS,
+              maxCacheTokens: meta.maxCacheTokens ?? 3_000_000,
               // 다턴 누적(캐시읽기) 절감: meta.json에서 per-agent 상한 지정 가능, 미설정 시 20.
               maxTurns: (typeof meta.maxTurns === "number" && meta.maxTurns > 0) ? meta.maxTurns : 20,
               bashTagSupport: false,
-              routeKeywords: [],
+              routeKeywords: meta.routeKeywords ?? [],
             });
           } catch (e) {
             console.error(`[Registry] meta.json 로드 실패 (${agentId}):`, e);
@@ -313,46 +366,92 @@ export function getDefaultAgent(): WorkerAgentDef | undefined {
   return loadAgents().find((a) => a.isDefault);
 }
 
-export function routeToAgent(request: string, projectName?: string): WorkerAgentDef | undefined {
-  const agents = loadAgents();
-  if (agents.length === 0) return undefined;
+export interface RouteCandidate {
+  agent: WorkerAgentDef;
+  keyword: string;
+  agentIndex: number;
+}
 
-  // longest-match 우선: 각 에이전트에서 매칭된 키워드 중 가장 긴 것을 대표로 삼고,
-  // 전 에이전트 대표 키워드를 길이 내림차순으로 정렬해 winner를 선택한다.
-  // 동점 시 agents.json 배열 뒤(더 구체적으로 등록된) 에이전트를 우선한다.
-  // 이 방식은 "리서치" < "딥리서치", "분석" < "심층 분석" 같은 substring 충돌을 방어한다.
+/**
+ * "^" 로 시작하는 routeKeyword는 접두 앵커 — 요청문이 (좌측 공백 제거 후) 그 나머지 문자열로
+ * *시작할 때만* 매칭된다(startsWith). 그 외 모든 키워드는 기존 그대로 부분일치(includes)다.
+ *
+ * 2026-08-28 QA 3회차 실증(잡 a2165962) — 접두 앵커만으로는 부족하다:
+ * 앵커가 매칭된 문장이라도 뒤에 다른 팀 업무(캘린더 등록·정산·이메일 발송)가 이어지면,
+ * 그 팀의 키워드도 같은 문장 안에서 매칭된다. 이때 기존 "최장 매칭 우선" 규칙을 그대로 쓰면
+ * 앵커 키워드가 문자 수만 많아도 실제 업무 도메인 키워드를 누르고 이긴다("선생님, "(5자) >
+ * "캘린더"(3자)). 그래서 앵커 후보는 **최후순위 폴백**으로 격하한다 — 앵커가 아닌(비앵커)
+ * 후보가 하나라도 있으면 그쪽을 무조건 채택하고, 앵커 후보는 "다른 어떤 에이전트도 이 문장을
+ * 주장하지 않을 때만" 승리한다. "요가 선생님, 정산…"·"담임 선생님, 캘린더…"처럼 애초에 앵커가
+ * 안 걸리는 3인칭 호출도 여전히 배제되고(문장이 "선생님"으로 시작하지 않음), "선생님, 정산해줘"
+ * 처럼 앵커는 걸리지만 실제 업무 키워드가 동시에 존재하는 문장도 그 업무 담당에게 넘어간다.
+ * 이 규칙은 앵커를 쓰는 모든 에이전트에 공통 적용되는 일반 규칙이며 mentor-advisor 전용 특례가
+ * 아니다 — routeKeywords 배열 순서·다른 에이전트의 includes() 동작은 그대로다.
+ */
+function matchKeyword(lower: string, kw: string): { matched: boolean; effectiveLen: number; anchored: boolean } {
+  if (kw.startsWith("^")) {
+    const needle = kw.slice(1).toLowerCase();
+    return { matched: lower.trimStart().startsWith(needle), effectiveLen: needle.length, anchored: true };
+  }
+  const needle = kw.toLowerCase();
+  return { matched: lower.includes(needle), effectiveLen: needle.length, anchored: false };
+}
+
+/**
+ * 순수 라우팅 후보 선정 — agents 배열과 request 문자열만으로 결과가 정해진다.
+ * loadAgents()의 파일 I/O에서 분리해 픽스처 기반 회귀 테스트를 가능하게 한다.
+ * longest-match 우선: 각 에이전트에서 매칭된 키워드 중 가장 긴 것을 대표로 삼고,
+ * 전 에이전트 대표 키워드를 길이 내림차순으로 정렬해 winner를 선택한다.
+ * 동점 시 agents 배열 뒤(더 구체적으로 등록된) 에이전트를 우선한다.
+ * 이 방식은 "리서치" < "딥리서치", "분석" < "심층 분석" 같은 substring 충돌을 방어한다.
+ * 앵커(^) 후보는 비앵커 후보가 하나도 없을 때만 폴백으로 채택된다(위 matchKeyword 주석 참고).
+ */
+export function pickRouteCandidate(agents: WorkerAgentDef[], request: string): RouteCandidate | undefined {
   const lower = request.toLowerCase();
 
-  interface RouteCandidate {
-    agent: WorkerAgentDef;
-    keyword: string;
-    agentIndex: number;
-  }
-
-  const candidates: RouteCandidate[] = [];
+  const plain: (RouteCandidate & { matchLen: number })[] = [];
+  const anchored: (RouteCandidate & { matchLen: number })[] = [];
   for (let i = 0; i < agents.length; i++) {
     const agent = agents[i];
     let bestKw: string | undefined;
+    let bestLen = -1;
+    let bestAnchored = false;
     for (const kw of agent.routeKeywords) {
-      if (lower.includes(kw.toLowerCase())) {
-        if (!bestKw || kw.length > bestKw.length) bestKw = kw;
+      const { matched, effectiveLen, anchored: isAnchor } = matchKeyword(lower, kw);
+      if (matched && effectiveLen > bestLen) {
+        bestKw = kw;
+        bestLen = effectiveLen;
+        bestAnchored = isAnchor;
       }
     }
-    if (bestKw) candidates.push({ agent, keyword: bestKw, agentIndex: i });
+    if (bestKw) {
+      const cand = { agent, keyword: bestKw, agentIndex: i, matchLen: bestLen };
+      (bestAnchored ? anchored : plain).push(cand);
+    }
   }
 
-  if (candidates.length === 0) {
-    console.log(`[Route] "${request.slice(0, 60)}" → 매칭 실패 (적합한 직원 없음)`);
-    return undefined;
-  }
+  const pool = plain.length > 0 ? plain : anchored;
+  if (pool.length === 0) return undefined;
 
-  candidates.sort((a, b) => {
-    const lenDiff = b.keyword.length - a.keyword.length;
+  pool.sort((a, b) => {
+    const lenDiff = b.matchLen - a.matchLen;
     if (lenDiff !== 0) return lenDiff;
     return b.agentIndex - a.agentIndex; // 동점: 배열 뒤(더 구체적) 에이전트 우선
   });
 
-  const winner = candidates[0];
+  return pool[0];
+}
+
+export function routeToAgent(request: string, projectName?: string): WorkerAgentDef | undefined {
+  const agents = loadAgents();
+  if (agents.length === 0) return undefined;
+
+  const winner = pickRouteCandidate(agents, request);
+  if (!winner) {
+    console.log(`[Route] "${request.slice(0, 60)}" → 매칭 실패 (적합한 직원 없음)`);
+    return undefined;
+  }
+
   console.log(`[Route] "${request.slice(0, 60)}" → ${winner.agent.name} (keyword: "${winner.keyword}")`);
   return winner.agent;
 }

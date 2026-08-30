@@ -42,6 +42,12 @@ export interface LoopStep {
   done_condition?: LoopDoneCondition;
   max_iterations?: number;
   no_progress_after?: number;
+  /**
+   * 산출물(보고서/MD 파일) 생성 생략 여부. 미지정 시 true(생략) — /api/delegate의 기존 기본값과 동일.
+   * 발굴·리서치·감사처럼 파일 산출물이 본질인 스텝에만 false를 명시한다.
+   * (2026-08-10: 이 필드가 없어 모든 루프 스텝이 상시 산출물 억제 상태였다 — repo-scout 발굴 3주 유실)
+   */
+  skip_output?: boolean;
 }
 
 export interface LoopBudget {

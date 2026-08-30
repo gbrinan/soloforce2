@@ -11,7 +11,7 @@ import { z } from "zod";
 
 const BASE_URL = process.env.MCP_APPDATA_BASE_URL || "http://127.0.0.1:3456";
 const APPS = new Set(
-  (process.env.MCP_APPDATA_APPS || "ledger,bookshelf,booking,diary,learn")
+  (process.env.MCP_APPDATA_APPS || "ledger,bookshelf,booking,diary,learn,projects")
     .split(",").map((s) => s.trim()).filter(Boolean),
 );
 
@@ -215,6 +215,26 @@ if (APPS.has("learn")) {
             createdAt: d.createdAt,
           })),
         });
+      } catch (e) { return fail(e); }
+    },
+  );
+}
+
+// ── projects: 고객사 프로젝트 조회 (GET /api/projects) — 읽기 전용 M1 ──────────
+if (APPS.has("projects")) {
+  server.tool(
+    "projects_query",
+    {
+      category: z.string().optional().describe("카테고리 필터(education|ax-consulting|ax-research|spf)"),
+      search: z.string().optional().describe("고객사·프로젝트명 부분일치"),
+    },
+    async ({ category, search }) => {
+      try {
+        const qs = new URLSearchParams();
+        if (category) qs.set("category", category);
+        if (search) qs.set("search", search);
+        const { projects } = await getJson<{ projects: Array<{ category: string; slug: string; name: string; client: string | null; status: string | null; sessions: unknown; domain: string[] }> }>("projects", `/api/projects${qs.toString() ? `?${qs}` : ""}`);
+        return ok({ total: projects.length, matched: projects.length, projects: projects.slice(0, 200).map((p) => ({ category: p.category, name: p.name, client: p.client, status: p.status, sessions: p.sessions, domain: p.domain })) });
       } catch (e) { return fail(e); }
     },
   );

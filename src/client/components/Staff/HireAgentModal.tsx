@@ -12,6 +12,7 @@ interface Props {
 // StaffPanel 역할 탭 모델 선택지와 동기 유지 (신규 채용은 최신 모델만 노출 — 레거시 제외)
 const MODELS = [
   { value: 'claude-fable-5', label: 'Fable 5' },
+  { value: 'claude-opus-5', label: 'Opus 5' },
   { value: 'claude-opus-4-8', label: 'Opus 4.8' },
   { value: 'claude-sonnet-5', label: 'Sonnet 5' },
   { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },

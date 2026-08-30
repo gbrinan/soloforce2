@@ -124,6 +124,8 @@ export function makeDefaultLlmRunner(): (prompt: string) => Promise<string> {
     const result = await runAgent(toAgentConfig(qaDef), "trajectory-judge", prompt, {
       model: process.env.TRAJECTORY_JUDGE_MODEL || "claude-haiku-4-5-20251001",
     });
+    const { logCost } = await import("./jobs.js");
+    if (result.cost) logCost("qa", undefined, result.cost, "qa:trajectory-judge");
     return result.output;
   };
 }

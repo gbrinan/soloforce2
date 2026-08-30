@@ -2,6 +2,15 @@ import { randomUUID, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, appendFileSync, statSync, realpathSync } from "node:fs";
 import { atomicWriteFileSync, quarantineCorruptFile } from "./utils/atomic-write.js";
+import { extractOutputPathsFromText } from "./utils/artifact-ext.js";
+import {
+  detectUpstreamLimit,
+  detectUpstreamLimitFrom,
+  formatResumeAt,
+  UpstreamLimitError,
+  MAX_DEFERRALS,
+} from "./upstream-limit.js";
+import { formatArtifactListForHandoff, formatQaTargetsWithStamp } from "./utils/path-normalize.js";
 import { join, basename, dirname, isAbsolute, resolve as pathResolve } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import type { AgentConfig, AgentResult, AgentCost, Job, JobStatus } from "../types.js";
@@ -51,6 +60,10 @@ import { buildSensitiveMatcher } from "../mcp/sensitive-paths.js";
 import { isSelectiveRecallEnabled, getRecallBudgetChars, buildWikiIndex, buildToc, formatToc, recallRelevant } from "./memory/recall.js";
 import { recordJobMetric } from "./metrics.js";
 import { resolveTier, escalateTier } from "./model-tiers.js";
+import { planStageModel } from "./worker-stage-model.js";
+import { decideQa, newCodeChanges } from "./qa-trigger-policy.js";
+import { resolveEffort, normalizeEffort } from "./effort-policy.js";
+import { buildCostEntry } from "./cost-entry.js";
 import type { ModelTier } from "./loops/types.js";
 
 const folderName = basename(PROJECT_SELF_DIR);
@@ -513,6 +526,15 @@ function acquireLease(agentId: string, jobId: string, interactive = false): Agen
     job.leaseUntilMs = lease.leaseUntilMs;
     // 자동 회수용 baseline: lease 시작 시점 outputs/{agent}/ 스냅샷 (multi-stage는 acquireLease마다 갱신)
     job.outputsBaseline = snapshotOutputsDir(agentId);
+    // 2026-08-24: 자동 QA 를 «잡 범위» 코드 변경으로 판정하기 위한 기준선.
+    // 여기서 찍는 이유: 워커가 실제로 손을 대기 직전이자, outputsBaseline 과 같은 생애주기다.
+    // null 이면 판정 불가 — 종료 시 안전측(QA 수행)으로 간다.
+    // ★ QA 2회차 P2-a 시정: outputsBaseline은 스테이지 전환마다 다시 찍는 게 맞다(자동 회수용,
+    // 스테이지별 갱신이 정상 동작). 반대로 codeBaseline은 소비처가 "잡 종료 시점의 잡 전체 판정"
+    // 하나뿐이라, 같은 자리에서 매 acquireLease마다 덮어쓰면 이전 스테이지의 변경이 기준선에
+    // 흡수돼 사라진다 — 최초 1회(잡 최초 lease)만 세운다. assignCodeBaselineOnce로 뽑아 단위
+    // 테스트 가능하게 한다(qa-trigger-policy-test.ts).
+    job.codeBaseline = assignCodeBaselineOnce(job.codeBaseline, snapshotCodeChanges(job.cwd));
     saveJobs();
   }
   auditLog("lease.acquired", { agentId, jobId, leaseUntilMs: lease.leaseUntilMs });
@@ -810,7 +832,17 @@ export function createJob(
   leaseSec?: number,
   maxTurns?: number,
   todoId?: string,
+  effort?: string,
 ): Job {
+  // 미등록 agent id 거부 — 통과시키면 실행 시점에 조용히 자동 라우팅으로 폴백해
+  // 엉뚱한 직원에게 배정된다(2026-08-08 "backend" 사고). 생성 시점에 막는 게 맞다.
+  if (agent && !getWorkerAgent(agent)) {
+    throw new Error(
+      `unknown-agent: "${agent}" 는 등록되지 않은 직원 id입니다. `
+      + `history/agents.json 또는 config/agents/<id>/meta.json을 확인하세요.`,
+    );
+  }
+
   // 재시도 가드 체크 (24시간 내 3회 실패 시 차단)
   checkRetryGuard(request);
   
@@ -832,6 +864,8 @@ export function createJob(
     skipPlanGate,
     ...(leaseSec !== undefined && leaseSec > 0 ? { leaseSec } : {}),
     ...(maxTurns !== undefined && maxTurns > 0 ? { maxTurns } : {}),
+    // 모르는 값은 싣지 않는다 — 저장해 두면 나중에 "지정했는데 왜 안 먹지"로 오진된다.
+    ...(normalizeEffort(effort) ? { effort: normalizeEffort(effort) as string } : {}),
     ...(stages && stages.length > 0 ? { stages, stageAgents, currentStage: 0, stageResults: [] } : {}),
   };
 
@@ -1201,14 +1235,40 @@ async function askGenieToVerify(cmd: string): Promise<boolean> {
   return answer.startsWith("허용");
 }
 
+// bash 실행 파일 해석 — 이 머신(Windows)에는 bash가 PATH에 없어서 execFile("bash", ...)가
+// 항상 `spawn bash ENOENT`로 죽었다. 그 결과 잡 post-validation(`[ -f tsconfig.json ] && npx tsc
+// --noEmit`)이 실제 검증이 아니라 항상 실패로 끝났다 — chat.ts 재시작 게이트가 앓던 것과 같은 병이다.
+// 명령이 POSIX 문법이라 cmd.exe로는 대체할 수 없으므로, Git for Windows가 함께 깔아주는 bash를 찾아 쓴다.
+// System32\bash.exe(WSL)는 제외한다 — 파일시스템 뷰가 달라 C:\ 경로 cwd가 깨진다.
+let bashPathCache: string | null = null;
+function resolveBashPath(): string {
+  if (bashPathCache) return bashPathCache;
+  const candidates = [
+    process.env.MYCREW_BASH_PATH,
+    ...(process.platform === "win32"
+      ? ["C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+         "C:\\Program Files (x86)\\Git\\bin\\bash.exe"]
+      : ["/bin/bash", "/usr/bin/bash"]),
+  ].filter((p): p is string => Boolean(p));
+  for (const p of candidates) {
+    try { if (existsSync(p)) { bashPathCache = p; return p; } } catch { /* 접근 불가 — 다음 후보 */ }
+  }
+  bashPathCache = "bash"; // 못 찾으면 ENOENT를 그대로 드러낸다(침묵 통과 금지)
+  return bashPathCache;
+}
+
 async function execBash(cmd: string, cwd?: string, timeoutMs = 60000): Promise<string> {
   const { execFile } = await import("node:child_process");
   return new Promise((resolve) => {
-    execFile("bash", ["-c", cmd], {
+    execFile(resolveBashPath(), ["-c", cmd], {
       maxBuffer: 5 * 1024 * 1024,
       timeout: timeoutMs,
       ...(cwd && { cwd }),
-      env: { ...process.env, PATH: `${process.env.PATH}:${CLAUDE_BIN_DIR}` },
+      // PATH 구분자는 플랫폼을 따른다 — Windows는 ';'. 여기만 ':'로 하드코딩돼 있어서
+      // CLAUDE_BIN_DIR이 직전 PATH 항목 꼬리에 붙어버렸고(예: "...\System32:C:\...\bin"),
+      // 그 결과 post-validation 명령이 claude 바이너리를 영영 못 찾았다.
+      // agent.ts:572·terminal-ws.ts:199·worker-pty.ts:145는 이미 플랫폼 분기를 쓰고 있다.
+      env: { ...process.env, PATH: `${process.env.PATH ?? ""}${process.platform === "win32" ? ";" : ":"}${CLAUDE_BIN_DIR}` },
     }, (error, stdout, stderr) => {
       if (error) {
         resolve(`[에러] ${stderr || error.message}`);
@@ -1440,13 +1500,10 @@ function parseStage(output: string, jobId: string, agentName?: string): string {
 
 const COST_LOG_FILE = join(HISTORY_DIR, "cost-log.jsonl");
 
-export function logCost(agentId: string, jobId: string | undefined, cost: AgentCost): void {
-  const entry = {
-    timestamp: new Date().toISOString(),
-    agentId,
-    jobId: jobId || null,
-    ...cost,
-  };
+// source: 이 비용을 발생시킨 «발화/실행의 출처». 2026-08-23 신설.
+// 생략하면 키 자체가 안 붙어 이전 형식과 동일하다(cost-entry.ts 하위호환 계약).
+export function logCost(agentId: string, jobId: string | undefined, cost: AgentCost, source?: string): void {
+  const entry = buildCostEntry(agentId, jobId, cost, source);
   try {
     appendFileSync(COST_LOG_FILE, JSON.stringify(entry) + "\n");
   } catch { /* ignore */ }
@@ -1661,26 +1718,43 @@ function loadRecentDailySummaries(agentId: string, days: number = 3): string {
   } catch { return ""; }
 }
 
+// 워커가 자기 잡을 '타인의 동시 진행 잡'으로 오인하는 것을 막는다.
+//
+// 2026-08-08 실측: 워커는 자기 job id를 모른 채 history/jobs.json을 직접 읽는다. 그래서
+// 거기 있는 자기 행을 타인으로 읽고 "backend가 같은 지시를 동시 실행 중"이라 판단해,
+// 지시 1건을 '이미 남이 했다'며 건너뛰는 사고가 났다(3fce5e94). 같은 오인이 d38b6e93에서도
+// 반복됐다 — 부주의가 아니라 식별 수단이 없어서 생기는 구조적 결함이다.
+// 해결은 간단하다: 자기 id를 알려준다.
+function buildJobIdBlock(jobId?: string): string {
+  if (!jobId) return "";
+  return `[현재 잡] 지금 당신이 수행 중인 잡의 ID는 ${jobId} 입니다.\n`
+    + `history/jobs.json 등에서 활성 잡 목록을 볼 때 이 ID는 **당신 자신**입니다 — `
+    + `타인의 동시 진행 잡으로 오인하지 마세요. 중복 위임을 판단하려면 이 ID를 먼저 제외하고 보세요.\n\n`;
+}
+
 function buildWorkerPrompt(
   agentDef: WorkerAgentDef,
   sessionId: string | undefined,
   body: string,
   projectName?: string,
+  jobId?: string,
 ): string {
   const projWiki = loadProjectWiki(projectName);
   const projBlock = projWiki ? `[프로젝트 공유 메모]\n${projWiki}\n[공유 메모 끝]\n\n` : "";
   const tagReminder = buildTagReminder(agentDef.id);
   const orgShort = buildOrgChart(false) + "\n\n";
+  // 잡마다 달라지는 값이라 resume 세션에도 매번 실어 보낸다(캐시된 정체성 블록에 넣을 수 없다).
+  const jobBlock = buildJobIdBlock(jobId);
 
   if (sessionId) {
     // resume: 직원 변경, role-directive, 프로젝트 공유 메모 변경 감지
     if (checkStaffChange(agentDef.id) || checkWorkerRdChange(agentDef.id) || checkProjectWikiChange(projectName)) {
       clearPmSession(agentDef.id);
       console.log(`[${agentDef.id}] 변동 감지 → 세션 리셋`);
-      return buildWorkerPrompt(agentDef, undefined, body, projectName);
+      return buildWorkerPrompt(agentDef, undefined, body, projectName, jobId);
     }
     // resume: 세션 컨텍스트에 조직도/태그/위키 이미 존재 → 작업 내용만 전달
-    return body;
+    return jobBlock + body;
   }
 
   // 새 세션: 정체성 + 조직도(요약) + 위키 인덱스 + 3일 요약
@@ -1716,7 +1790,7 @@ function buildWorkerPrompt(
     }
   }
 
-  return `${identity}\n\n${orgFull}\n\n${wikiBlock}${dailySection}${recallSection}${projBlock}${tagReminder}\n\n${body}`;
+  return `${identity}\n\n${orgFull}\n\n${wikiBlock}${dailySection}${recallSection}${projBlock}${tagReminder}\n\n${jobBlock}${body}`;
 }
 
 function extractPlanText(output: string): string {
@@ -1742,6 +1816,8 @@ ${plan}
   const result = await runGenieAgent(`plan-review-${attempt}`, prompt, { freshSession: true });
 
   if (!result.success) {
+    const limitOnFail = detectUpstreamLimit(result.error);
+    if (limitOnFail) throw new UpstreamLimitError(limitOnFail);
     return { approved: false, feedback: result.error ?? "마이크루 검토 실패" };
   }
 
@@ -1751,6 +1827,11 @@ ${plan}
     const feedback = answer.replace(/^반려[:：]?\s*/, "").trim();
     return { approved: false, feedback: feedback || "(사유 미제공)" };
   }
+  // ★ 형식 오류로 반려하기 전에 상류 한도부터 판정한다.
+  // 한도 통지("You've hit your session limit ...")를 '형식 오류'로 읽으면 반려 3회를 소모하고
+  // 잡이 failed로 종결된다 (2026-08-17 c61e450f 실사고). 한도는 결함이 아니라 재시도 대상이다.
+  const limit = detectUpstreamLimit(answer);
+  if (limit) throw new UpstreamLimitError(limit);
   return {
     approved: false,
     feedback: `마이크루 응답 형식 오류: ${answer.slice(0, 200)}`,
@@ -1775,6 +1856,9 @@ async function runPlanApprovalGate(
   const planConfig: AgentConfig = {
     ...config,
     allowedTools: ["Read", "Glob", "Grep"],
+    // 2026-08-24: 계획 단계만 별도 모델(worker-stage-model.ts). runWorkerAgent 가 config.planModel 로
+    // 계산해 넣어 준다. 미지정이면 실행 모델 그대로 = 기존 동작 불변.
+    model: config.planModel ?? config.model,
   };
 
   const job = jobId ? jobs.get(jobId) : undefined;
@@ -1784,7 +1868,7 @@ async function runPlanApprovalGate(
   }
 
   let sessionId = initialSessionId;
-  let planPrompt = buildWorkerPrompt(agentDef, sessionId, `${PLAN_PREFIX}\n\n${request}`, projectName);
+  let planPrompt = buildWorkerPrompt(agentDef, sessionId, `${PLAN_PREFIX}\n\n${request}`, projectName, jobId);
 
   for (let attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
     if (job) {
@@ -1807,18 +1891,30 @@ async function runPlanApprovalGate(
       onSystemMessage: makeSessionCheckpointer(agentId, jobId),
     });
 
+    // ★ 2026-08-23 신설 — 계획 수립 비용은 여태 cost-log 에 한 행도 안 남았다
+    //   (finalizeWorkerResult 를 안 타는 유일한 adapter.execute 경로였다).
+    //   otel-spans 로만 복원 가능했던 월 $404 가 여기서 장부 안으로 들어온다.
+    if (planResult.cost) {
+      logCost(agentId, jobId, planResult.cost, "worker:plan");
+      if (jobId) addCostToJob(jobId, planResult.cost);
+    }
+
     // 세션 만료 시 새 세션으로 재시도
     if (!planResult.success && sessionId) {
       console.log(`[Plan] 세션 만료, 새 세션으로 재시도`);
       clearPmSession(agentId);
       sessionId = undefined;
-      planPrompt = buildWorkerPrompt(agentDef, undefined, `${PLAN_PREFIX}\n\n${request}`, projectName);
+      planPrompt = buildWorkerPrompt(agentDef, undefined, `${PLAN_PREFIX}\n\n${request}`, projectName, jobId);
       planResult = await adapter.execute(planConfig, `${agentId}-plan`, planPrompt, {
         cwd,
         onProgress,
         onSpawn: makeChildPidRegistrar(jobId),
         onSystemMessage: makeSessionCheckpointer(agentId, jobId),
       });
+      if (planResult.cost) {
+        logCost(agentId, jobId, planResult.cost, "worker:plan-retry");
+        if (jobId) addCostToJob(jobId, planResult.cost);
+      }
     }
 
     if (planResult.sessionId) {
@@ -1894,7 +1990,7 @@ async function finalizeWorkerResult(
 
   // 비용 기록
   if (result.cost) {
-    logCost(agentId, jobId, result.cost);
+    logCost(agentId, jobId, result.cost, "worker:execute");
     if (jobId) addCostToJob(jobId, result.cost);
   }
 
@@ -1932,7 +2028,7 @@ async function finalizeWorkerResult(
       });
 
       if (result.cost) {
-        logCost(agentId, jobId, result.cost);
+        logCost(agentId, jobId, result.cost, "worker:bash-feedback");
         if (jobId) addCostToJob(jobId, result.cost);
       }
       if (result.sessionId) {
@@ -1981,6 +2077,13 @@ async function finalizeWorkerResult(
     .trim();
 }
 
+// ★ 2026-08-24 — per-agent maxCacheTokens 상한 발동 조건. 두 실행 경로(planGate/direct)가 같은
+// 식을 중복 작성하고 있어 하나로 모았다 — 단위 테스트 가능(cache-cap-test.ts).
+// capTokens가 0/미설정이면 상한 없음(항상 false) — agents.json에 값이 없는 직원은 절대 안 걸린다.
+export function cacheCapExceeded(cacheReadTokens: number | undefined, capTokens: number | undefined): boolean {
+  return !!capTokens && capTokens > 0 && !!cacheReadTokens && cacheReadTokens > capTokens;
+}
+
 async function runWorkerAgent(
   agentDef: WorkerAgentDef,
   request: string,
@@ -1994,6 +2097,9 @@ async function runWorkerAgent(
   config.extraDisallowedTools = getPolicyDisallowedTools();
   // job.maxTurns override 시 모든 adapter.execute 호출(plan/execute/retry/stage)에 일관 적용
   const overrideJob = jobId ? jobs.get(jobId) : undefined;
+  // effort 자동 승격의 비교 기준 — maxTurns 오버라이드를 덮어쓰기 **전**의 에이전트 정의 기본값.
+  // 순서를 뒤집으면 항상 "같다"가 되어 승격이 영영 발동하지 않는다.
+  const agentDefaultMaxTurns = config.maxTurns;
   if (overrideJob?.maxTurns && overrideJob.maxTurns > 0) {
     config.maxTurns = overrideJob.maxTurns;
   }
@@ -2002,6 +2108,32 @@ async function runWorkerAgent(
   const overrideModel = (overrideJob as (Job & { model?: string }) | undefined)?.model;
   if (overrideModel) {
     config.model = overrideModel;
+  }
+  // 2026-08-24 단계별 모델 분리 — 계획 단계만 별도 모델로 승격(실행 모델은 위에서 확정된 값 유지).
+  // 여기서 계산하는 이유: overrideModel 유무를 아는 유일한 자리다. runPlanApprovalGate 는 모른다.
+  config.planModel = planStageModel({
+    agentId,
+    executeModel: config.model,
+    hasJobModelOverride: !!overrideModel,
+     configuredModel: agentDef.planModel,
+  });
+  if (config.planModel !== config.model) {
+    // 조용히 바꾸지 않는다 — console.log 는 processJob 의 capture 훅을 타 job.logs 에 남는다.
+    console.log(`[StageModel] ${agentDef.name} 계획=${config.planModel} / 실행=${config.model}`);
+  }
+  // effort — 잡 명시값 > 자동 승격(긴 lease·늘린 maxTurns) > 에이전트 기본 > low.
+  // model/maxTurns와 같은 자리에서 config에 주입하므로 plan/execute/retry/stage 전 경로에 동일 적용된다.
+  const effortDecision = resolveEffort({
+    jobEffort: overrideJob?.effort,
+    configEffort: config.effort,
+    leaseSec: overrideJob?.leaseSec,
+    jobMaxTurns: overrideJob?.maxTurns,
+    agentMaxTurns: agentDefaultMaxTurns,
+  });
+  config.effort = effortDecision.effort;
+  if (effortDecision.source === "auto") {
+    // 조용히 올리지 않는다 — console.log는 processJob의 capture 훅을 타 job.logs에 그대로 남는다.
+    console.log(`[Effort] ${agentDef.name} effort 자동 승격 → medium (${effortDecision.reason})`);
   }
   let sessionId = loadPmSession(agentId);
 
@@ -2060,13 +2192,13 @@ async function runWorkerAgent(
     // 계획 세션이 유실되면(리셋/파일 부재) "위 계획" 참조가 공허해진다 — 새 세션엔 원 요청을 함께 전달 (본문 미전달 재발 방지)
     const execResumeSid = liveSession(approvedSession, cwd);
     const executePrompt = execResumeSid
-      ? "[실행 모드] 위 계획이 승인됐습니다. 이제 계획대로 실행하세요. 모든 도구 사용 가능합니다."
+      ? buildJobIdBlock(jobId) + "[실행 모드] 위 계획이 승인됐습니다. 이제 계획대로 실행하세요. 모든 도구 사용 가능합니다."
       : buildWorkerPrompt(agentDef, undefined, `[실행 모드] 승인된 작업입니다. (계획 세션 유실로 원 요청을 직접 전달합니다)
 
 원 요청:
 ${request}
 
-위 요청을 지금 실행하세요. 모든 도구 사용 가능합니다.`, projectName);
+위 요청을 지금 실행하세요. 모든 도구 사용 가능합니다.`, projectName, jobId);
     if (!execResumeSid) console.warn(`[${agentId}] 계획 세션 유실 → 원 요청 폴백으로 실행`);
     const executeResult = await adapter.execute(config, `${agentId}-job`, executePrompt, {
       resumeSessionId: execResumeSid,
@@ -2086,8 +2218,12 @@ ${request}
 
     // 비용 기반 세션 리셋 (planGate 에이전트)
     const maxCachePG = agentDef.maxCacheTokens ?? 0;
-    if (maxCachePG > 0 && executeResult.cost?.cacheReadTokens && executeResult.cost.cacheReadTokens > maxCachePG) {
-      console.log(`[${agentId}] 캐시 토큰 임계 초과 (${(executeResult.cost.cacheReadTokens / 1_000_000).toFixed(1)}M > ${maxCachePG / 1_000_000}M) → 세션 리셋`);
+    const cacheReadPG = executeResult.cost?.cacheReadTokens;
+    if (cacheCapExceeded(cacheReadPG, maxCachePG)) {
+      console.log(`[${agentId}] 캐시 토큰 임계 초과 (${(cacheReadPG! / 1_000_000).toFixed(1)}M > ${maxCachePG / 1_000_000}M) → 세션 리셋`);
+      // 2026-08-24: 손익분기 기반 상한(cache-baseline-estimate) 발동 여부를 사후에 실측 가능하게
+      // audit.jsonl에도 구조화 기록한다 — console.log는 job.logs에만 남아 집계가 번거롭다.
+      auditLog("cache.reset", { agentId, jobId, cacheReadTokens: cacheReadPG, capTokens: maxCachePG, path: "planGate" });
       clearPmSession(agentId);
       addGenieMessage(`🔄 ${agentDef.name}이(가) 피곤(토큰초과)해서 기분전환(세션리셋) 했습니다.`);
     }
@@ -2105,7 +2241,7 @@ ${request}
   }
 
   // 기타 워커: 기존 흐름 유지
-  const prompt = buildWorkerPrompt(agentDef, sessionId, request, projectName);
+  const prompt = buildWorkerPrompt(agentDef, sessionId, request, projectName, jobId);
   if (!sessionId) console.log(`[${agentId}] 새 세션으로 시작 (위키 로드됨)`);
 
   let result = await adapter.execute(config, `${agentId}-job`, prompt, {
@@ -2120,9 +2256,15 @@ ${request}
   // 세션 만료 시 재시도
   if (!result.success && sessionId) {
     console.log(`[${agentId}] 세션 만료, 새 세션으로 재시도`);
+    // ★ 덮어쓰기 전에 1차 시도 비용을 남긴다. finalizeWorkerResult 는 «마지막 result» 만
+    //   받으므로 재시도가 일어나면 1차분이 조용히 사라졌다(2026-08-23 시정).
+    if (result.cost) {
+      logCost(agentId, jobId, result.cost, "worker:execute-attempt1");
+      if (jobId) addCostToJob(jobId, result.cost);
+    }
     clearPmSession(agentId);
     sessionId = undefined;
-    const retryPrompt = buildWorkerPrompt(agentDef, undefined, request, projectName);
+    const retryPrompt = buildWorkerPrompt(agentDef, undefined, request, projectName, jobId);
     result = await adapter.execute(config, `${agentId}-job`, retryPrompt, {
       cwd,
       onProgress,
@@ -2140,8 +2282,10 @@ ${request}
 
   // 비용 기반 세션 리셋: maxCacheTokens 초과 시 다음 호출은 새 세션으로
   const maxCache = agentDef.maxCacheTokens ?? 0;
-  if (maxCache > 0 && result.cost?.cacheReadTokens && result.cost.cacheReadTokens > maxCache) {
-    console.log(`[${agentId}] 캐시 토큰 임계 초과 (${(result.cost.cacheReadTokens / 1_000_000).toFixed(1)}M > ${maxCache / 1_000_000}M) → 세션 리셋`);
+  const cacheReadDirect = result.cost?.cacheReadTokens;
+  if (cacheCapExceeded(cacheReadDirect, maxCache)) {
+    console.log(`[${agentId}] 캐시 토큰 임계 초과 (${(cacheReadDirect! / 1_000_000).toFixed(1)}M > ${maxCache / 1_000_000}M) → 세션 리셋`);
+    auditLog("cache.reset", { agentId, jobId, cacheReadTokens: cacheReadDirect, capTokens: maxCache, path: "direct" });
     clearPmSession(agentId);
     addGenieMessage(`🔄 ${agentDef.name}이(가) 피곤(토큰초과)해서 기분전환(세션리셋) 했습니다.`);
   }
@@ -2180,6 +2324,52 @@ export function triggerProcessQueue(): void {
   setTimeout(() => processQueue(), 0);
 }
 
+/**
+ * 상류 한도로 지연된 잡인가 — 종결 처리(완료시각·보고·아카이브·자동진행)를 건너뛸 단일 기준.
+ * 이 판정을 호출부마다 따로 쓰지 않는 이유: 기준이 갈라지면 어떤 경로는 지연 잡을 '완료'로 보고한다.
+ */
+export function isDeferredForLimit(job: Job): boolean { // 테스트 노출
+  return job.status === "queued" && typeof job.deferredUntilMs === "number";
+}
+
+/**
+ * 상류(Anthropic) 세션/사용 한도면 잡을 지연 재개 상태로 돌린다.
+ * ★ 조립 지점을 하나로 모은다 — 계획 게이트·재시도 catch·성공 경로가 각자 판단하면 우선순위가 조용히 갈라진다.
+ * @param source Error 또는 워커 결과 문자열 (어느 쪽이든 같은 판정)
+ * @returns 지연시켰으면 true. false면 호출부는 기존 failed 경로를 그대로 탄다.
+ */
+export function deferJobForUpstreamLimit(job: Job, source: unknown, log: (line: string) => void): boolean { // 테스트 노출
+  const hit = detectUpstreamLimitFrom(source);
+  if (!hit) return false;
+
+  const count = (job.deferCount ?? 0) + 1;
+  if (count > MAX_DEFERRALS) {
+    log(`[지연 상한] 상류 세션 한도 ${MAX_DEFERRALS}회 초과 — 기존대로 실패 처리합니다`);
+    auditLog("job.defer_exhausted", { jobId: job.id, deferCount: count });
+    return false;
+  }
+
+  job.deferCount = count;
+  job.deferredUntilMs = hit.resumeAtMs;
+  job.status = "queued";
+  job.error = undefined;
+  log(`[지연] 상류 세션 한도 — ${formatResumeAt(hit.resumeAtMs)} 이후 자동 재개 (${count}/${MAX_DEFERRALS}) · 원문: ${hit.message}`);
+  auditLog("job.deferred", {
+    jobId: job.id,
+    resumeAt: new Date(hit.resumeAtMs).toISOString(),
+    deferCount: count,
+  });
+  return true;
+}
+
+/** 지연된 잡을 큐로 되돌린다. 중복 적재를 막고, 종결 이벤트(emitDone) 없이 상태만 알린다. */
+function requeueDeferredJob(job: Job): void {
+  if (!queue.includes(job.id)) queue.push(job.id);
+  job.childPid = undefined;
+  saveJobs();
+  emitGlobalEvent("job-update", { id: job.id, status: job.status, request: job.request });
+}
+
 async function processQueue(): Promise<void> {
   if (queueProcessing) return;
   queueProcessing = true;
@@ -2189,6 +2379,8 @@ async function processQueue(): Promise<void> {
       const idx = queue.findIndex((id) => {
         const j = jobs.get(id);
         if (!j) return false;
+        // 상류 한도로 지연된 잡은 재개 시각 전까지 건너뜀 (한도 소진 = 재시도 대상)
+        if (j.deferredUntilMs && j.deferredUntilMs > Date.now()) return false;
         // 에이전트가 바쁘면 건너뜀
         if (leases.has(resolveAgent(j))) return false;
         // 선행 작업이 완료되지 않았으면 건너뜀
@@ -2260,6 +2452,7 @@ async function processJob(jobId: string): Promise<void> {
 
   job.status = "running";
   job.startedAt = new Date().toISOString();
+  job.deferredUntilMs = undefined; // 재개했으므로 지연 마커 해제 (deferCount는 상한 관리를 위해 유지)
   const startedAgentId = resolveAgent(job);
   auditLog("job.started", { jobId: job.id, agent: startedAgentId });
   emitGlobalEvent("job-update", { id: job.id, status: "running", request: job.request });
@@ -2295,6 +2488,8 @@ async function processJob(jobId: string): Promise<void> {
 
   const MAX_RETRIES = 3;
   let lastError = "";
+  // 상류 한도로 지연 재개 상태가 됐는가 — 종결 처리(분류·보고·아카이브)를 전부 건너뛰기 위한 플래그
+  let deferred = false;
 
   try {
     // multi-stage 파이프라인: stageAgents가 있으면 단계별 에이전트 자동 교체
@@ -2349,6 +2544,9 @@ async function processJob(jobId: string): Promise<void> {
           try {
             transitionTodosForJob(job.id, "working", `[${job.stages[stageIdx]}] ${effectiveAgent.name} 작업 시작`);
             stageResult = await runWorkerAgent(effectiveAgent, stageRequest, job.projectName, job.id, job.cwd);
+            // 워커가 '성공'으로 돌아왔지만 본문이 한도 통지뿐인 경우 (2026-08-17 cfdb89e6: result 전문 55자)
+            const stageLimit = detectUpstreamLimit(stageResult);
+            if (stageLimit) throw new UpstreamLimitError(stageLimit);
 
             // post-validation
             if (effectiveAgent.postValidation?.length) {
@@ -2375,11 +2573,18 @@ async function processJob(jobId: string): Promise<void> {
             break;
           } catch (err) {
             lastError = err instanceof Error ? err.message : String(err);
+            // 상류 한도는 작업 결함이 아니다 — 재시도를 소모하지 않고 즉시 지연 재개로 이탈
+            if (deferJobForUpstreamLimit(job, err, (line) => capture(originalLog, line))) {
+              deferred = true;
+              break;
+            }
             if (attempt === MAX_RETRIES) {
               stageFailed = true;
             }
           }
         }
+
+        if (deferred) break;
 
         if (stageFailed) {
           job.status = "failed";
@@ -2394,7 +2599,7 @@ async function processJob(jobId: string): Promise<void> {
       }
 
       // 모든 stage 성공
-      if (job.status !== "failed") {
+      if (!deferred && job.status !== "failed") {
         const finalResult = job.stageResults!.join("\n\n---\n\n");
         
         // QA 보고서 구조개선 ①: exit + stderr + stdout 종합 분류
@@ -2447,11 +2652,20 @@ async function processJob(jobId: string): Promise<void> {
             );
           }
 
-          const agent = (job.agent && getWorkerAgent(job.agent))
+          // 지정 id가 미등록이면 getWorkerAgent가 undefined를 주고 || 로 폴백해 엉뚱한 직원에게
+          // 배정되는데, 로그는 '(지정)'이라 찍혀 지정대로 간 것처럼 오도했다.
+          // (2026-08-08 잡 3fce5e94: agent="backend"(미등록) → AX컨설턴트 배정 → 워커가 자기 잡을
+          //  '백엔드가 돌리는 다른 잡'으로 오인) 지정이 실제로 먹혔는지 구분해 남긴다.
+          const pinnedAgent = job.agent ? getWorkerAgent(job.agent) : undefined;
+          if (job.agent && !pinnedAgent) {
+            capture(originalLog, `[라우팅] 경고: 지정 id "${job.agent}" 미등록 — 자동 라우팅으로 폴백`);
+          }
+          const agent = pinnedAgent
             || routeToAgent(request, job.projectName)
             || getDefaultAgent();
           if (!agent) throw new Error("에이전트를 찾을 수 없습니다 (agents.json 확인 필요)");
-          capture(originalLog, `[라우팅] ${agent.name}에게 배정${job.agent ? ' (지정)' : ''}`);
+          const routeNote = pinnedAgent ? " (지정)" : job.agent ? ` (지정 "${job.agent}" 미등록 → 자동)` : "";
+          capture(originalLog, `[라우팅] ${agent.name}에게 배정${routeNote}`);
           const agentT = agent as typeof agent & { modelTier?: ModelTier };
           const jobT = job as Job & { model?: string; escalatedTier?: boolean; escalatedFromModel?: string; escalatedToModel?: string };
           // 모델 티어 자동 승격: 첫 재시도(attempt===2)에서 1회만 적용 — jobT.escalatedTier로 상한 관리.
@@ -2473,6 +2687,9 @@ async function processJob(jobId: string): Promise<void> {
 
           transitionTodosForJob(job.id, "working", "작업 시작");
           const taskResult = await runWorkerAgent(agent, request, job.projectName, job.id, job.cwd);
+          // 워커가 '성공'으로 돌아왔지만 본문이 한도 통지뿐인 경우 (2026-08-17 cfdb89e6: result 전문 55자)
+          const taskLimit = detectUpstreamLimit(taskResult);
+          if (taskLimit) throw new UpstreamLimitError(taskLimit);
 
           // post-validation gate
           if (agent.postValidation?.length) {
@@ -2532,6 +2749,11 @@ async function processJob(jobId: string): Promise<void> {
           break;
         } catch (err) {
           lastError = err instanceof Error ? err.message : String(err);
+          // 상류 한도는 작업 결함이 아니다 — 재시도를 소모하지 않고 즉시 지연 재개로 이탈
+          if (deferJobForUpstreamLimit(job, err, (line) => capture(originalLog, line))) {
+            deferred = true;
+            break;
+          }
           if (attempt === MAX_RETRIES) {
             job.status = "failed";
             job.error = lastError;
@@ -2544,6 +2766,24 @@ async function processJob(jobId: string): Promise<void> {
   } finally {
     console.log = originalLog;
     console.error = originalError;
+    if (isDeferredForLimit(job)) {
+      // ★ 종결이 아니다. 완료시각·보고·아카이브·자동진행을 전부 건너뛰고 큐로 되돌린다.
+      //   여기서 종결 처리를 태우면 지연 잡이 '실패'로 마이크루에 보고되어(processCallback status=failed)
+      //   같은 오독(한도=결함)이 한 층 아래에서 재현된다.
+      requeueDeferredJob(job);
+    } else {
+      await finalizeTerminalJob(job);
+    }
+  }
+}
+
+/**
+ * 잡 종결 처리 — 완료시각 기록·지표·아카이브·콜백·자동 재시작·자동 진행.
+ * processJob의 finally에서 분리했다: 상류 한도 지연(queued 복귀) 경로가 이 블록 전체를 건너뛰어야 하는데,
+ * 개별 부작용마다 조건을 다는 방식은 하나만 빠뜨려도 지연 잡이 '완료/실패'로 새어나간다.
+ */
+async function finalizeTerminalJob(job: Job): Promise<void> {
+  { // (블록 유지 — 아래 본문은 finally에서 그대로 옮겨온 것이라 들여쓰기·diff를 보존한다)
     job.completedAt = new Date().toISOString();
     job.childPid = undefined; // fix B: 정상 종료 → PID stale 방지
     saveJobs();
@@ -2639,79 +2879,99 @@ async function processJob(jobId: string): Promise<void> {
   }
 }
 
-// 응답 본문에서 산출물 .md 경로를 추출 (history/outputs/<agent>/<...>.md)
-// 절대경로는 PROJECT_SELF_DIR 내부일 때만 인정. 그 외 절대경로(/agentTeam/...) → missing 후보로 마킹.
-function extractOutputPaths(text: string): string[] {
-  const paths = new Set<string>();
-  // 절대경로: ...history/outputs/<agent>/<...>.md
-  for (const m of text.matchAll(/(\/[\w./\-가-힣 ]+?\/history\/outputs\/[\w./\-가-힣 ]+?\.md)/g)) {
-    paths.add(m[1]);
+// [2026-08-24 제거] looksLikeQaRequest — 요청문 어휘로 QA 를 발동하던 축.
+//   정규식이 `\bQA\b|검증|테스트|점검|리뷰|review|verify|품질검사` 였는데 한국어 지시서 거의 전부에
+//   「검증」이 들어간다. 사실상 상시 참이라 «조건»으로 기능하지 못했다.
+//   명시 요청은 job.forceQa 로 받는다 — 어휘 추정이 아니라 호출자가 세우는 깃발이다.
+//   (되살리려면 여기가 아니라 qa-trigger-policy.ts 에 넣고 음성 대조를 짝으로 짜라.)
+
+// 자동 QA «표본» 시각 저장소 — 코드 변경 0건 잡도 주 1회는 돌린다(완전히 끄지 않는다).
+// 에이전트별 마지막 표본 시각만 담는 작은 파일. 판정 자체는 qa-trigger-policy.ts 가 한다.
+const QA_SAMPLE_FILE = join(HISTORY_DIR, "qa-sample-state.json");
+function readQaSampleState(): Record<string, string> {
+  try {
+    return JSON.parse(readFileSync(QA_SAMPLE_FILE, "utf-8")) as Record<string, string>;
+  } catch {
+    return {};
   }
-  // 상대경로: history/outputs/<agent>/<...>.md (앞에 따옴표·공백·역따옴표 등 경계)
-  for (const m of text.matchAll(/(?:^|[\s`'"`(])(history\/outputs\/[\w./\-가-힣 ]+?\.md)/g)) {
-    paths.add(m[1]);
+}
+function readQaSampleAt(agentId: string): string | null {
+  return readQaSampleState()[agentId] ?? null;
+}
+function markQaSampled(agentId: string): void {
+  try {
+    const s = readQaSampleState();
+    s[agentId] = new Date().toISOString();
+    writeFileSync(QA_SAMPLE_FILE, JSON.stringify(s, null, 2), "utf-8");
+  } catch (e) {
+    console.error("[AutoQA] 표본 시각 저장 실패:", e);
   }
-  return [...paths];
 }
 
-// 추출된 경로가 PROJECT_SELF_DIR 기준에서 실존하는지 검증.
-// 본문에 경로가 0건이면 빈 배열 반환(스킵). 미발견 경로만 반환.
-function checkOutputsMissing(text: string, _job: Job): string[] {
-  const paths = extractOutputPaths(text);
-  if (paths.length === 0) return [];
-  const missing: string[] = [];
-  for (const p of paths) {
-    if (p.startsWith("/")) {
-      // 절대경로: SELF_DIR 하위가 아니면 정책 위반 → missing
-      if (!p.startsWith(PROJECT_SELF_DIR + "/")) {
-        missing.push(p);
-        continue;
-      }
-      if (!existsSync(p)) missing.push(p);
-    } else {
-      const abs = join(PROJECT_SELF_DIR, p);
-      if (!existsSync(abs)) missing.push(p);
-    }
-  }
-  return missing;
-}
-
-// 명시적 QA 요청 감지 — 요청문에 QA/검증/테스트/review 계열 키워드가 있으면 사용자가 QA를 원한 것.
-const QA_REQUEST_RE = /\bQA\b|검증|테스트|점검|리뷰|review\b|verify|품질\s*검사/i;
-function looksLikeQaRequest(request: string): boolean {
-  return QA_REQUEST_RE.test(request || "");
-}
-
-// 코드 변경 태스크 감지 — cwd(기본 리포 루트) 워킹트리에 코드 파일 미커밋 변경이 있으면 true.
-// git porcelain을 코드 확장자/경로로 필터. git 없거나 실패 시 false(안전측: QA 미발동).
+// 코드 변경 감지 — cwd 워킹트리의 «코드 파일 미커밋 변경 경로 집합»을 돌려준다.
+//
+// ★ 2026-08-24 정정. 이전 판은 boolean 을 돌려주는 hasCodeChanges 였고 «레포 전체»를 봤다.
+//   그 잡이 무엇을 바꿨는지와 무관했다 — 이 레포에는 진단 스크립트 등 미추적 코드 파일이 상시
+//   수십 개 있어 사실상 모든 잡에서 영구히 true 였다. 그래서 「코드 변경 0건」 잡에도 자동 QA 가
+//   붙어 tsc·lint·unit 3항목을 N/A 로 처리하며 돌았다(2026-08-23 실측).
+//   ⇒ 집합을 돌려주고, 잡 시작 시점 스냅샷과의 «차집합»으로 잡 범위 판정을 한다.
+//   git 없거나 실패 시 null — 「변경 없음(빈 배열)」과 구분해야 한다. null 은 판정 불가이고,
+//   판정 불가의 기본값은 안전측(QA 수행)이다. 빈 배열로 뭉개면 조용히 QA 가 꺼진다.
 const CODE_CHANGE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|css|scss|less|html|vue|svelte|go|rs|java|kt|swift|rb|php|sql|sh|json|yaml|yml)$/i;
-function hasCodeChanges(cwd: string | undefined): boolean {
+
+// ★ QA 2회차 P2-a — codeBaseline "최초 1회만 고정" 계약. 이미 값이 있으면 손대지 않는다(undefined일
+// 때만 채운다). acquireLease가 스테이지 전환마다 재호출돼도 이전 스테이지의 기준선이 보존된다.
+export function assignCodeBaselineOnce(existing: string[] | undefined, snapshot: string[] | null): string[] | undefined {
+  return existing ?? (snapshot ?? undefined);
+}
+// ★ 2026-08-24 QA 2회차 P1·P2-a·P3-b 시정. 경로 문자열만 비교하면 두 경로가 샌다:
+//   R1) lease 시점에 이미 더러운 파일을 그 잡이 "더" 고쳐도 경로 집합은 그대로 → 차집합 0
+//   R2) 그 잡이 고치고 커밋해 워킹트리에서 경로가 사라져도 → 차집합 0 (규율 있게 커밋할수록 QA를 피함)
+//   ⇒ 경로 대신 "<path>\t<mtimeMs>\t<size>" 지문을 비교한다. 재수정(R1)은 mtime/size가 바뀌어 새 지문으로
+//   잡히고, 커밋(R2)은 HEAD 센티널("\0HEAD\t<rev>")이 바뀌어 잡힌다. newCodeChanges는 문자열 집합 차집합만
+//   하므로 이 지문 문자열도 그대로 통과한다(qa-trigger-policy.ts:110).
+//   -c core.quotepath=false 는 P3-b(비ASCII 경로가 8진 이스케이프로 인용돼 정규식 $ 앵커를 놓치는 잠재
+//   함정) 예방 — 현재 발현 사례는 0건이지만 QA가 잠재 함정으로 남긴 것을 여기서 막는다.
+function snapshotCodeChanges(cwd: string | undefined): string[] | null {
   const dir = cwd || process.cwd();
   try {
-    const out = spawnSync("git", ["-C", dir, "status", "--porcelain"], {
+    const head = spawnSync("git", ["-C", dir, "-c", "core.quotepath=false", "rev-parse", "HEAD"], {
       encoding: "utf-8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
     });
-    if (out.status !== 0 || !out.stdout) return false;
+    if (head.status !== 0 || typeof head.stdout !== "string") return null;
+    const out = spawnSync("git", ["-C", dir, "-c", "core.quotepath=false", "status", "--porcelain"], {
+      encoding: "utf-8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (out.status !== 0 || typeof out.stdout !== "string") return null;
+    const fingerprints: string[] = [`\0HEAD\t${head.stdout.trim()}`];
     for (const line of out.stdout.split("\n")) {
       // porcelain: "XY <path>" (rename은 "orig -> new") — 경로 부분만 추출해 확장자 검사
-      const path = line.slice(3).trim().split(" -> ").pop() ?? "";
-      if (path && CODE_CHANGE_RE.test(path)) return true;
+      const p = line.slice(3).trim().split(" -> ").pop() ?? "";
+      if (!p || !CODE_CHANGE_RE.test(p)) continue;
+      const abs = isAbsolute(p) ? p : join(dir, p);
+      try {
+        const st = statSync(abs);
+        fingerprints.push(`${p}\t${st.mtimeMs}\t${st.size}`);
+      } catch {
+        // 삭제된 파일 등 stat 불가 — 경로만으로 지문화(그래도 상태 변화가 잡힘)
+        fingerprints.push(`${p}\t-\t-`);
+      }
     }
-    return false;
+    return fingerprints.sort();
   } catch {
-    return false;
+    return null;
   }
 }
 
+// [2026-08-10] 확장자 절단 결함 수정. 기존 정규식은 후행 경계가 없고 jsonl이 미등재라
+//   seen.jsonl → seen.json, crew-post-*.json.posted → *.json 으로 잘려 디스크에 없는
+//   유령 경로를 만들었다(.posted 26건 실재). 소비처가 표시·전달 4곳이라 링크가 깨지고
+//   QA 핸드오프(§산출물 파일)를 stat하면 오탐 FAIL이 났다.
+//   확장자 목록·경계 규약은 ./utils/artifact-ext.ts 단일 소스로 이관 — 08-08 qa-auto-judge.ts와 공유.
 function extractOutputFiles(job: Job): string[] {
-  const re = /(?:history|agentTeam)\/[^\s"'<>]+\.(?:pptx|xlsx|pdf|csv|json|md|txt|png|jpg|jpeg|gif|webp|mp4|webm)/g;
-  const ALLOW_PREFIXES = ["history/outputs/", "history/attachments/", "agentTeam/"];
   const files = new Set<string>();
   for (const log of job.logs) {
-    const matches = log.match(re);
-    if (matches) matches.forEach((m) => {
-      if (ALLOW_PREFIXES.some((p) => m.startsWith(p))) files.add(m);
-    });
+    for (const p of extractOutputPathsFromText(log)) files.add(p);
   }
   return [...files];
 }
@@ -2872,7 +3132,7 @@ export function processCallback(payload: {
     // 필터가 "알림 불필요"로 판단하면 지니 턴 자체를 생략(로그만 남김) — fail-safe는 항상 "알림" 쪽.
     void (async () => {
       try {
-        const { decideJobNotify, enqueueBatchedNotify, formatBatchedGenieNotice } = await import("./job-notify-gate.js");
+        const { decideJobNotify, enqueueBatchedNotify, formatBatchedGenieNotice, notifySourceForBatch } = await import("./job-notify-gate.js");
         const isTodoLinked = getTodosByJobId(job.id).length > 0;
         const approvalsMod = await import("./approvals.js") as { hasApprovalHistory?: (jobId: string) => boolean };
         const isApprovalGated = approvalsMod.hasApprovalHistory?.(job.id) ?? false;
@@ -2899,10 +3159,13 @@ export function processCallback(payload: {
 
         // 배칭 — 짧은 시간 창(기본 7초) 내 여러 job이 완료되면 하나의 지니 턴으로 코일레싱.
         enqueueBatchedNotify(
-          { jobId: job.id, requestPreview, statusText, summary },
+          { jobId: job.id, requestPreview, statusText, summary, status: job.status },
           (items) => {
             const genieNotice = formatBatchedGenieNotice(items);
-            sendMessage(genieNotice, undefined, undefined, { internal: true, source: "job:notify" })
+            // source 를 :ok / :fail 로 쪼개 모델 티어를 가른다(internal-source-tier.ts).
+            // 배치 보수 판정 — 전건 completed 일 때만 :ok(cheap). 하나라도 섞이면 :fail(standard).
+            const notifySource = notifySourceForBatch(items);
+            sendMessage(genieNotice, undefined, undefined, { internal: true, source: notifySource })
               .catch((err) => {
                 console.error("[Job] 마이크루 알림 실패 → scheduler 재시도 대기:", err);
                 for (const it of items) {
@@ -2945,16 +3208,29 @@ TODO 태그 사용 금지.`;
   // 옵트아웃: qaTriggered(재귀 차단) / skipQa(호출자 명시) 존중.
   // 환경변수: AUTO_QA_TRIGGER=false 시 완전 비활성.
   const AUTO_QA_TRIGGER = process.env.AUTO_QA_TRIGGER !== "false";
-  const qaWanted = job.forceQa === true || looksLikeQaRequest(job.request) || hasCodeChanges(job.cwd);
+  // 2026-08-24 조건부화 — 판정은 qa-trigger-policy.ts(순수 모듈)로 옮겼다.
+  // 신호: «잡 범위» 코드 변경(종료 스냅샷 − lease 시점 스냅샷). 레포 전체 더러움이 아니다.
+  // looksLikeQaRequest 는 발동 축에서 뺐다 — `검증|테스트|점검|리뷰` 가 한국어 지시서 거의 전부에
+  // 걸려 사실상 상시 참이었다. 명시 요청은 forceQa 로 받는다(호출자가 진짜 원할 때 세우는 깃발).
+  const codeNow = snapshotCodeChanges(job.cwd);
+  const jobScopedCodeChanges = codeNow === null ? null : newCodeChanges(job.codeBaseline, codeNow).length;
+  const qaDecision = decideQa({
+    jobScopedCodeChanges,
+    forceQa: job.forceQa,
+    skipQa: job.skipQa,
+    qaTriggered: job.qaTriggered,
+    agentId: job.agent,
+    request: job.request,
+    lastSampleAtIso: job.agent ? readQaSampleAt(job.agent) : null,
+    nowIso: new Date().toISOString(),
+  });
+  // 조용히 끄지 않는다 — 판정 사유를 항상 남긴다. 「왜 QA 가 안 붙었지」를 로그로 답할 수 있어야 한다.
+  console.log(`[AutoQA] ${job.agent ?? "-"} ${qaDecision.run ? "수행" : "생략"} — ${qaDecision.reason}`);
+  if (qaDecision.run && qaDecision.isSample && job.agent) markQaSampled(job.agent);
   if (
     AUTO_QA_TRIGGER &&
-    qaWanted &&
-    job.status === "completed" &&
-    job.agent &&
-    job.agent !== "qa" &&
-    job.agent !== "dev-pm" &&
-    !job.qaTriggered &&
-    !job.skipQa
+    qaDecision.run &&
+    job.status === "completed"
   ) {
     // 1단: precheckArtifacts — 산출물 파일 실존·mtime 검증 (거짓 보고 차단)
     void (async () => {
@@ -3021,13 +3297,34 @@ TODO 태그 사용 금지.`;
         // PASS → 기존 QA 흐름 진행
         const origTitle = job.request.split("\n")[0].trim().slice(0, 80);
         const qaReport = (job.fullResult ?? job.logs.slice(-20).join("\n")).slice(0, 12000);
-        const outputFilesList = (job.outputFiles ?? []).join(", ") || "(없음)";
+        // [2026-08-11 핫픽스, 잡 2c13109c] 유령 산출물 차단.
+        //   extractOutputFiles는 로그 텍스트에서 라벨로 뽑을 뿐 실존을 보지 않는다. 잡 도중
+        //   만들었다가 정직하게 삭제한 임시파일이 다음 워커에게 "산출물"로 광고됐고, 워커가
+        //   그걸 근거로 거짓 주장을 [HARD] 위키에 등재했다(잭키 QA F1, P1).
+        //   ★ 표시 지점에서만 거른다 — precheckArtifacts(판정기)는 건드리지 않는다(:2731-2734 전례).
+        //   ★ .txt는 OUTPUT_EXT에 있지만 ARTIFACT_EXT에는 없어 판정기 관할 밖이다.
+        //     즉 이 필터가 .txt 유령의 유일한 방어선이다(scripts/phantom-artifact-handoff-test.ts T9).
+        const outputFilesList = formatArtifactListForHandoff(
+          job.outputFiles ?? [],
+          job.cwd || PROJECT_SELF_DIR,
+        );
+        // [2026-08-21 핫픽스, 잡 ff70ffb8] stale 판정 차단.
+        //   QA FAIL #1이 이전 회차 산출물을 보고 지적 2건을 냈고 둘 다 정본에는 기재돼 있었다.
+        //   상대경로만 주면 어느 회차를 열어도 지시 위반이 아니다 — 절대경로+mtime으로 대상을 못박는다.
+        const qaTargets = formatQaTargetsWithStamp(
+          job.outputFiles ?? [],
+          job.cwd || PROJECT_SELF_DIR,
+        );
       const qaRequest =
         `[자동 QA] ${origTitle}\n` +
         `워커(${job.agent}) 작업 완료. **실제 테스트 실행 + 검증** 필수.\n\n` +
         `## 원본 요청\n${job.request.slice(0, 500)}\n\n` +
         `## 워커 5단 보고/로그 (말미)\n${qaReport}\n\n` +
         `## 산출물 파일\n${outputFilesList}\n\n` +
+        `## 🎯 판정 대상 고정 (이 경로·이 시각의 파일만 본다)\n${qaTargets}\n` +
+        `- 위 절대경로 **외의 파일로 판정하지 말 것.** 같은 주제의 구본이 다른 디렉터리에 남아 있을 수 있다.\n` +
+        `- 지적하기 전에 그 문자열을 위 파일에 직접 grep해 부재를 확인할 것. 히트하면 그 지적은 이전 회차 대상(stale)이다.\n` +
+        `- 지적이 전부 stale이어도 **결론 수치는 따로 검산**할 것 — 총계는 맞고 지목만 틀린 FAIL이 실제로 있었다(2026-08-21).\n\n` +
         `## ⚠️ 필수 검증 절차 (모두 실제 실행)\n` +
         `1. **타입 체크**: \`npx tsc --noEmit\` (대상 프로젝트) → 출력 첨부\n` +
         `2. **린트**: \`npm run lint\` 또는 \`eslint\` (가능 시) → 출력 첨부\n` +
@@ -3121,8 +3418,15 @@ async function reportToGenie(job: Job): Promise<void> {
     job.fullResult
     ?? (resultLine ?? job.logs.slice(-3).join("\n"))
   ).slice(0, 4000);
+  // [2026-08-12 QA P2] 유령 산출물 차단을 이 지점에도 적용한다.
+  // 여기는 마이크루(LLM)가 사장님께 보고할 때 읽는 프롬프트다 — d5cb689가 고친 QA 핸드오프(:3053)와
+  // 같은 무검증 job.outputFiles를 광고하고 있었다. 잡 도중 만들었다 삭제한 임시파일이 "산출물"로
+  // 실려 거짓 보고로 전파되는 경로가 그대로 살아 있었다.
+  // baseDir은 :3053·qa-auto-judge.ts:124와 축자 동일하게 맞춘다(판정기/표시기 기준 불일치 방지).
+  // basename 축약을 버리고 원본 경로를 넘기는 이유: bare 파일명은 광역 폴백(1레벨 전 폴더 스캔)을
+  // 타서 타 폴더 동명 파일을 '실존'으로 오판할 수 있다. 스코프가 있는 원본 경로가 더 안전하다.
   const outputFiles = job.outputFiles?.length
-    ? `\n산출물: ${job.outputFiles.map(f => f.split("/").pop()).join(", ")}`
+    ? `\n산출물: ${formatArtifactListForHandoff(job.outputFiles, job.cwd || PROJECT_SELF_DIR)}`
     : "";
 
   let prompt: string;

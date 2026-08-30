@@ -2,7 +2,7 @@
   "id": "fleet-status",
   "name": "함대관제",
   "jobTitle": "함대 관제 담당",
-  "team": "개발팀",
+  "team": "운영팀",
   "adapter": "claude-code",
   "model": "claude-sonnet-5",
   "isCore": false,
