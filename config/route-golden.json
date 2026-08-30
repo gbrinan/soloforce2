@@ -3,9 +3,9 @@
   "routes": [
     "/api/health",
     "/api/staff",
-    "/api/voice",
+    "/api/voice/health",
     "/api/jobs",
-    "/api/approval"
+    "/api/approvals"
   ],
   "staticAssets": [
     "/vad/silero_vad_legacy.onnx"
