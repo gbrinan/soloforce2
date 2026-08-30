@@ -180,3 +180,10 @@ Out of Scope 3건의 착수 포인터:
 | 3 기본값 | 나머지 전원 | voice.json 미생성 (파일 수 = 드리프트 표면 — 절제) |
 
 규칙: ① 음색 color는 팀 톤과 정합 ② 이름은 voice.json에 넣지 않는다(표시명 정본은 온보딩 — 계급1 드리프트 예방) ③ filler는 역할 지시서 '성격' 절과 일치.
+
+## P4 도메인 반영 구현 (2026-08-31)
+
+- 발견: Google SSO(계정 허용 목록·세션 파일 유지)는 이미 구현돼 있었음 — P4의 실제 갭은 "외부 도메인 설정 + SSO 미설정" 조합의 무경고 통과(fail-open, 계급 5 동류).
+- 구현: 기동 시 domain-gate — TUNNEL_URL/NGROK_URL/SOLOFORCE_DOMAIN 설정 시 SSO 필수, 아니면 exit 78. 의도적 공개는 SOLOFORCE_ALLOW_PUBLIC_NOAUTH=1 명시로만. 로컬(외부 URL 없음)은 기존대로 개방.
+- 실증: 4조합 로직 테스트 — 로컬 BOOT / 도메인+무SSO REFUSE / 도메인+SSO BOOT / 명시적 공개 BOOT.
+- SOLOFORCE_DOMAIN 신설: 배포 도메인 선언 키 (soloforce.app 또는 임의 도메인).

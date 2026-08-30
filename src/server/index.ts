@@ -112,6 +112,18 @@ export function startServer(port = 3456): void {
       loadJobs();
       loadTodos();
       loadTasks();
+      // 도메인 노출 게이트 (P4, fail-closed) — 외부 URL이 설정됐는데 SSO가 꺼져 있으면 기동을 거부한다.
+      // 과거 재발 계급 5(권한 바닥 fail-open)와 같은 클래스: "공개 노출 + 무인증"이 조용히 성립하는 조합을 막는다.
+      // 로컬 개발(외부 URL 미설정)은 기존대로 로그인 없이 동작. 의도적 공개는 SOLOFORCE_ALLOW_PUBLIC_NOAUTH=1로만 가능.
+      {
+        const externalUrl = process.env.TUNNEL_URL || process.env.NGROK_URL || process.env.SOLOFORCE_DOMAIN || "";
+        const ssoOn = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+        if (externalUrl && !ssoOn && process.env.SOLOFORCE_ALLOW_PUBLIC_NOAUTH !== "1") {
+          console.error(`[domain-gate] 외부 도메인(${externalUrl})이 설정됐지만 Google SSO가 꺼져 있습니다.`);
+          console.error("[domain-gate] GOOGLE_CLIENT_ID/SECRET을 설정하거나, 의도적 공개라면 SOLOFORCE_ALLOW_PUBLIC_NOAUTH=1을 명시하세요. 기동을 중단합니다.");
+          process.exit(78); // EX_CONFIG
+        }
+      }
       loadAuthSessions();
       loadSchedules();
       loadScheduleRequests();
