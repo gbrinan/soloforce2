@@ -38,6 +38,7 @@ import {
   getCostLog,
   logCost,
   processCallback,
+  resolveProjectCwd,
 } from "./jobs.js";
 import { getTokenUsage } from "./token-usage.js";
 import { getAdapterModelCatalog } from "../adapters/index.js";
@@ -103,6 +104,8 @@ import { createApproval, resolveApproval, getApprovalStatus, getPendingApprovals
 import { verifyApprovalToken, getDashboardApprovalToken } from "./approval-auth.js";
 import { getTunnelStatus, resetTunnel } from "./tunnel.js";
 import { PROJECTS_DIR, HISTORY_DIR, PROJECT_SELF_DIR, getTodayKST, toKstDate } from "../config.js";
+import { listProjects, getProject, readProjectFile } from "./projects-query.js";
+import { writeProjectFile } from "./projects-write.js";
 import { runGatewayClaude, runGateway, verifyGatewayToken, isOverDailyBudget, getDailyBudget } from "./ai-gateway.js";
 import { searchAll, buildAskContext } from "./ai-search.js";
 import { streamSSE } from "hono/streaming";
@@ -701,6 +704,43 @@ export function registerRoutes(app: Hono): void {
     return c.json(projects);
   });
 
+  // 요구사항 자동 인제스트 (SPEC R12)
+  // 서버는 "무엇을 처리할지"만 결정적으로 계산한다(중복·판본·정산). 정규화는 에이전트가 하고,
+  // 규칙은 config/guides/{corpus-gates,ingest-pitfalls,requirements-ingest}.md에 있다.
+  app.post("/api/projects/requirements/ingest", async (c) => {
+    const body = await c.req.json<{ project?: string; delegate?: boolean; agent?: string; completed?: string[] }>()
+      .catch(() => ({} as { project?: string; delegate?: boolean; agent?: string; completed?: string[] }));
+    const project = body.project?.trim();
+    if (!project) return c.json({ error: "project is required" }, 400);
+    try {
+      resolveProjectCwd(project);   // 경로 검증(2단·traversal 차단) 재사용
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "invalid project" }, 400);
+    }
+    const rawDir = join(PROJECTS_DIR, project, "10-requirements", "raw");
+    if (!existsSync(rawDir)) return c.json({ error: `요구사항 원본 폴더가 없습니다: ${project}/10-requirements/raw` }, 404);
+
+    const { scanRequirements, saveManifest, buildIngestRequest, markIngested } = await import("./requirements-ingest.js");
+    // 완료 보고가 함께 오면 스캔 전에 기록한다 — 그래야 이번 응답의 정산에 반영된다.
+    const completedResult = body.completed?.length ? markIngested(project, body.completed) : null;
+    const { manifest, reconciliation } = scanRequirements(project);
+    saveManifest(project, manifest);
+    const request = buildIngestRequest(project, manifest);
+
+    let job: ReturnType<typeof createJob> | null = null;
+    if (body.delegate && reconciliation.toProcess > 0) {
+      job = createJob(request, project, undefined, body.agent?.trim() || "ingest-crab");
+    }
+    return c.json({
+      project,
+      reconciliation,
+      entries: manifest.entries.map((e) => ({ file: e.file, state: e.state, supersededBy: e.supersededBy, reason: e.reason })),
+      request,
+      job,
+      ...(completedResult ? { completed: completedResult } : {}),
+    });
+  });
+
   // 이미지 업로드
   app.post("/api/upload", async (c) => {
     const MAX_UPLOAD_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -779,6 +819,7 @@ export function registerRoutes(app: Hono): void {
       skipOutput?: boolean;
       taskId?: string;
       taskTitle?: string;
+      effort?: string;
     },
     options: { external: boolean; externalAgentId?: string },
   ) {
@@ -833,6 +874,7 @@ export function registerRoutes(app: Hono): void {
       body.leaseSec,
       body.maxTurns,
       todo.id,
+      body.effort,
     );
     setJobTaskMeta(job.id, task.id, task.instruction);
     // ACK 페이로드
@@ -874,6 +916,7 @@ export function registerRoutes(app: Hono): void {
       selfRestart?: boolean;
       taskId?: string;
       taskTitle?: string;
+      effort?: string;
     }>().catch(() => null);
     if (!body?.request?.trim()) {
       return c.json({ error: "request is required" }, 400);
@@ -1131,13 +1174,36 @@ export function registerRoutes(app: Hono): void {
     const results: { base: string; files: ReturnType<typeof listFiles> }[] = [];
     if (!base || base === "projects") {
       if (existsSync(PROJECTS_DIR)) {
-        const dirs = readdirSync(PROJECTS_DIR, { withFileTypes: true });
-        for (const d of dirs) {
+        // AX: 프로젝트는 최상위 또는 사업라인 폴더 하위 2단에 있을 수 있다(SPEC R16).
+        // 노출 대상 = outputs/ + 표준 4단 폴더(10-/20-/30-/40- 등 NN- 접두). 코드 프로젝트는 outputs만 잡혀 과다 노출되지 않는다.
+        const STD_DIR_RE = /^\d{2}-/;
+        const isProject = (abs: string) => existsSync(join(abs, "project.json")) || existsSync(join(abs, "outputs"));
+        const collect = (relPath: string) => {
+          const abs = join(PROJECTS_DIR, relPath);
+          const files: ReturnType<typeof listFiles> = [];
+          const push = (sub: string) => {
+            for (const f of listFiles(join(abs, sub))) {
+              files.push({ ...f, relativePath: sub + "/" + f.relativePath.replace(/\\/g, "/") });
+            }
+          };
+          if (existsSync(join(abs, "outputs"))) push("outputs");
+          try {
+            for (const d of readdirSync(abs, { withFileTypes: true })) {
+              if (d.isDirectory() && STD_DIR_RE.test(d.name)) push(d.name);
+            }
+          } catch { /* 조회 실패는 무시 */ }
+          if (files.length) results.push({ base: "projects/" + relPath, files });
+        };
+        for (const d of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
           if (!d.isDirectory() || d.name.startsWith(".")) continue;
-          const outputsDir = join(PROJECTS_DIR, d.name, "outputs");
-          if (existsSync(outputsDir)) {
-            results.push({ base: "projects/" + d.name, files: listFiles(outputsDir) });
-          }
+          const abs = join(PROJECTS_DIR, d.name);
+          if (isProject(abs)) { collect(d.name); continue; }
+          try {
+            for (const child of readdirSync(abs, { withFileTypes: true })) {
+              if (!child.isDirectory() || child.name.startsWith(".") || child.name === "node_modules") continue;
+              if (isProject(join(abs, child.name))) collect(d.name + "/" + child.name);
+            }
+          } catch { /* 조회 실패는 무시 */ }
         }
       }
     }
@@ -1161,7 +1227,7 @@ export function registerRoutes(app: Hono): void {
     };
     for (const group of results) {
       const baseDir = BASE_DIR_MAP[group.base] || (group.base.startsWith("projects/")
-        ? join(PROJECTS_DIR, group.base.slice("projects/".length), "outputs")
+        ? join(PROJECTS_DIR, group.base.slice("projects/".length))
         : "");
       if (!baseDir) continue;
       for (const f of group.files) {
@@ -1427,16 +1493,21 @@ export function registerRoutes(app: Hono): void {
     } else if (base === "config") {
       rootDir = resolve(".", "config");
     } else if (base?.startsWith("projects")) {
-      const projectName = subpath.split("/")[0];
-      if (!projectName) return c.notFound();
-      rootDir = join(PROJECTS_DIR, projectName, "outputs");
+      // AX(R16): subpath는 PROJECTS_DIR 기준 상대경로(중첩 프로젝트·표준 폴더 포함).
+      // 구형 링크(projects/{name}/{file} = outputs 생략형)는 아래 fallback으로 계속 동작.
+      rootDir = PROJECTS_DIR;
     } else {
       return c.notFound();
     }
 
-    const filepath = (base === "history" || base === "reports" || base === "external-attachments" || base === "config")
-      ? resolve(rootDir, subpath)
-      : resolve(rootDir, subpath.split("/").slice(1).join("/"));
+    let filepath = resolve(rootDir, subpath);
+    if (base?.startsWith("projects") && !existsSync(filepath)) {
+      // 구형 링크 fallback: projects/{project}/{file} → {project}/outputs/{file}
+      const segs = subpath.split("/");
+      if (segs.length >= 2) {
+        filepath = resolve(rootDir, join(segs[0], "outputs", segs.slice(1).join("/")));
+      }
+    }
 
     if (!filepath.startsWith(rootDir)) return c.notFound();
     if (!existsSync(filepath)) return c.notFound();
@@ -1746,7 +1817,8 @@ export function registerRoutes(app: Hono): void {
       cacheReadTokens: Number(u.cacheReadTokens) || 0,
       cacheCreateTokens: Number(u.cacheCreateTokens) || 0,
       durationMs: Number(body.durationMs) || 0,
-    });
+      // 외부 앱 자가보고 — 실청구액과 대조 불가.
+    }, "app:self-report");
     return c.json({ ok: true });
   });
 
@@ -1810,7 +1882,7 @@ export function registerRoutes(app: Hono): void {
         cacheReadTokens: r.usage?.cacheReadTokens || 0,
         cacheCreateTokens: r.usage?.cacheCreateTokens || 0,
         durationMs: r.durationMs || 0,
-      });
+      }, "app:gateway:generate");
       return c.json({ text: r.text, costUsd: r.costUsd, usage: r.usage, model: r.model, durationMs: r.durationMs });
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
@@ -1846,7 +1918,7 @@ export function registerRoutes(app: Hono): void {
           cacheReadTokens: r.usage?.cacheReadTokens || 0,
           cacheCreateTokens: r.usage?.cacheCreateTokens || 0,
           durationMs: r.durationMs || 0,
-        });
+        }, "app:gateway:stream");
         await stream.writeSSE({ data: JSON.stringify({ done: true, text: r.text, costUsd: r.costUsd, usage: r.usage, model: r.model, durationMs: r.durationMs }) });
       } catch (e) {
         await stream.writeSSE({ data: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) });
@@ -1892,7 +1964,7 @@ export function registerRoutes(app: Hono): void {
           outputTokens: r.usage?.outputTokens || 0,
           cacheReadTokens: 0, cacheCreateTokens: 0,
           durationMs: r.durationMs || 0,
-        });
+        }, "host:ask");
         await stream.writeSSE({ data: JSON.stringify({ done: true, text: r.text, costUsd: r.costUsd, model: r.model }) });
       } catch (e) {
         await stream.writeSSE({ data: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) });
@@ -2794,6 +2866,77 @@ export function registerRoutes(app: Hono): void {
     return c.json({ ok: true, ...result });
   });
 
+  // 아난다라 교육 → 교육 프로젝트 폴더 수동 동기화 (자동은 일 1회 — anandara-projects.ts)
+  app.post("/api/anandara-projects-sync", async (c) => {
+    const { syncAnandaraProjects } = await import("./anandara-projects.js");
+    const result = await syncAnandaraProjects();
+    if (!result) return c.json({ ok: false, error: "아난다라 응답 없음 (앱 미기동?)" }, 502);
+    return c.json({ ok: true, ...result });
+  });
+
+  // 아난다라 교육 D-3 → 교육자료 제작 요청 수동 스캔 (자동은 일 1회 프로젝트 동기화에 포함)
+  app.post("/api/anandara-edu-material-scan", async (c) => {
+    const { scanEduMaterialHooks } = await import("./anandara-projects.js");
+    const result = await scanEduMaterialHooks();
+    if (!result) return c.json({ ok: false, error: "아난다라 응답 없음 (앱 미기동?)" }, 502);
+    return c.json({ ok: true, ...result });
+  });
+
+  // 지난 교육 자동 완료 수동 트리거 (자동은 일 1회 프로젝트 동기화 말미 — anandara-projects.ts)
+  // ?dryRun=1 이면 판정만 하고 아무것도 바꾸지 않는다 — 완료는 되돌리기 어려우므로 먼저 확인용.
+  app.post("/api/anandara-complete-past", async (c) => {
+    const { completePastEducations } = await import("./anandara-projects.js");
+    const result = await completePastEducations(undefined, { dryRun: c.req.query("dryRun") === "1" });
+    if (!result) return c.json({ ok: false, error: "아난다라 조회 실패 (앱 미기동)" }, 502);
+    return c.json({ ok: true, ...result });
+  });
+
+  // 메일 인박스 스캔 수동 트리거 (자동은 하루 2회 09:00/17:00 KST — mail-scan.ts)
+  app.post("/api/mail-scan", async (c) => {
+    const { runMailScan } = await import("./mail-scan.js");
+    const result = await runMailScan();
+    if (!result) return c.json({ ok: false, error: "Gmail 수집 실패 (claude CLI 미설치·미인증 또는 스캔 진행 중)" }, 502);
+    return c.json({ ok: true, ...result });
+  });
+
+  // 프로젝트 4대 분류 현황 — 카테고리별 프로젝트 목록
+  app.get("/api/project-categories", async (c) => {
+    const { categorySummary, ensureCategoryDirs } = await import("./anandara-projects.js");
+    ensureCategoryDirs();
+    return c.json({ ok: true, categories: categorySummary() });
+  });
+
+  // Projects 앱 M1 — 읽기 전용 canonical 조회 API (대시보드/지니/appdata 경유용)
+  app.get("/api/projects-query", (c) => {
+    const category = c.req.query("category") || undefined;
+    const search = c.req.query("search") || undefined;
+    return c.json({ ok: true, projects: listProjects({ category, search }) });
+  });
+  app.get("/api/projects-query/:category/:slug", (c) => {
+    const detail = getProject(c.req.param("category"), c.req.param("slug"));
+    if (!detail) return c.json({ ok: false, error: "not found" }, 404);
+    return c.json({ ok: true, project: detail });
+  });
+  app.get("/api/projects-query/:category/:slug/file", (c) => {
+    const path = c.req.query("path") || "";
+    const f = readProjectFile(c.req.param("category"), c.req.param("slug"), path);
+    if (!f) return c.json({ ok: false, error: "not found or not allowed" }, 404);
+    return c.json({ ok: true, file: f });
+  });
+  // Projects 앱 M2a — canonical 쓰기 라우트(읽기 GET .../file 과 대칭). 전역 ssoMiddleware(위) 뒤라
+  // 세션이 강제된다. 쓰기는 SSO 사용자 세션 전제만 — 경로탈출·확장자·NFC 격리는 writeProjectFile가 담당.
+  app.post("/api/projects-query/:category/:slug/file", async (c) => {
+    // 자기승인 우회 방지: SSO 활성 시 세션 없으면 거부. 로컬 SSO 비활성은 OWNER 폴백을 허용(issue-token 관례).
+    if (isSsoEnabled() && !getCurrentSession(c)) return c.json({ ok: false, error: "unauthorized" }, 401);
+    const body = await c.req.json<{ path?: string; content?: string }>()
+      .catch(() => ({} as { path?: string; content?: string }));
+    if (typeof body.path !== "string" || typeof body.content !== "string")
+      return c.json({ ok: false, error: "path and content are required" }, 400);
+    const r = writeProjectFile(c.req.param("category"), c.req.param("slug"), body.path, body.content);
+    if (!r.ok) return c.json({ ok: false, error: r.error }, r.code === 404 ? 404 : 400);
+    return c.json(r);
+  });
+
   app.get("/api/schedules", (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
@@ -3507,7 +3650,7 @@ export function registerRoutes(app: Hono): void {
   // 응답: { ok: true, jobs: [{id, status}, ...] }
   app.post("/api/delegate/plan", async (c) => {
     const body = await c.req.json<{
-      requests?: Array<{ request?: string; agent?: string; dependsOn?: number[] }>;
+      requests?: Array<{ request?: string; agent?: string; dependsOn?: number[]; effort?: string }>;
       taskId?: string;
       taskTitle?: string;
     }>().catch(() => null);
@@ -3535,6 +3678,17 @@ export function registerRoutes(app: Hono): void {
         undefined, // projectName
         undefined, // attachments
         typeof req.agent === "string" ? req.agent : undefined,
+        undefined, // cwd
+        undefined, // priority
+        undefined, // afterJobId
+        undefined, // selfRestart
+        undefined, // stages
+        undefined, // stageAgents
+        undefined, // skipPlanGate
+        undefined, // leaseSec
+        undefined, // maxTurns
+        undefined, // todoId
+        typeof req.effort === "string" ? req.effort : undefined,
       );
       indexToId.push(job.id);
       setJobTaskMeta(job.id, taskId, taskTitle);

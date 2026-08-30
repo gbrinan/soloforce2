@@ -11,7 +11,7 @@
  *  3) open 고아 알림        — runStuckCheck (todo-monitor.ts). received/plan_review 정체를
  *                            "상태"가 아니라 "알림 이벤트"로만 처리(state 미변경).
  */
-import { checkExpiredLeases, sweepStuckQueueOnBoot } from "./jobs.js";
+import { checkExpiredLeases, sweepStuckQueueOnBoot, triggerProcessQueue } from "./jobs.js";
 import { runStuckCheck, runBacklogDigest } from "./todo-monitor.js";
 import { sweepZombieWorkerPtys } from "./worker-pty.js";
 import { isGeniePtyHealthy, ptyRespawnForReset } from "./terminal-ws.js";
@@ -49,6 +49,9 @@ export async function sweepZombiePtys(): Promise<number> {
 export async function runWatchdog(): Promise<void> {
   checkExpiredLeases();
   sweepStuckQueueOnBoot();
+  // 상류 세션 한도로 지연된 잡(deferredUntilMs)은 외부 이벤트 없이도 재개돼야 한다.
+  // 매분 큐를 한 번 두드려 재개 시각이 지난 잡을 집게 한다 (processQueue는 재진입 락으로 보호됨).
+  triggerProcessQueue();
   await sweepZombiePtys();
   await runStuckCheck();
   await runBacklogDigest(); // 내부 게이트로 하루 1회만 실제 발화

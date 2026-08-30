@@ -112,7 +112,9 @@ export function extractAndLogCost(agentId: string, sessionId: string, durationMs
       cacheCreateTokens: u.cacheCreate,
       cacheReadTokens:   u.cacheRead,
       durationMs,
-    });
+    }, "pty:extractor");
+    // ⚠️ 이 경로는 데드코드다(procedure_cost-extractor-is-dead-code). source 를 붙이는 이유는
+    //    «형식 통일» + «되살아나면 원장에서 즉시 식별되게» 하기 위함이다.
   } catch (e) {
     console.error(`[Cost] ${agentId} 비용 추출 실패:`, e instanceof Error ? e.message : e);
   }

@@ -59,6 +59,7 @@ const APP_ITEMS: { id: string; name: string; description: string }[] = [
   { id: "ledger", name: "재무설계", description: "가계부(수입·지출·예산·구독) + 자산관리(예금·적금·주식·ETF·코인·외환·금 시세 자동 추적)" },
   { id: "diary", name: "내 일기", description: "날짜별 일기·무드 기록, AI 감정 분석·성찰 질문, 데일리 회고 자동 작성 (로컬 저장)" },
   { id: "learn", name: "학습", description: "텍스트·파일·링크·책·노트로 AI 학습 자료(요약·핵심개념·플래시카드·퀴즈) 생성 + SM-2 간격반복 암기" },
+  { id: "projects", name: "프로젝트", description: "교육·컨설팅 등 고객사 프로젝트(회차·교안·현장피드백·후속제안·산출물)를 카테고리별로 열람 (읽기 전용)" },
 ];
 
 // history/skills/ 스킬-알바 라이브 풀 미러 (src/server/skills.ts 시드와 동일 5종).

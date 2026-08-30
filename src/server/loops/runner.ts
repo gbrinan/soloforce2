@@ -7,13 +7,26 @@ import { getTask, createRoutineInstance, getOrCreateRoutineMaster, setTaskModel 
 import { getTodoById } from "../todos.js";
 import { sendMessage, addGenieMessage } from "../chat.js";
 import { appendRunStart, appendRun, loadState, saveState } from "./ledger.js";
-import { checkPreRun, checkMidRun, sumRunCost, bumpRunsToday, bumpMonthSpend } from "./budget.js";
+import { checkPreRun, checkMidRun, sumRunCost, bumpRunsToday, bumpMonthSpend, clearStaleBudgetPause } from "./budget.js";
 import { runUntilDone } from "./until-done.js";
 import { resolveTier } from "../model-tiers.js";
 import type { LoopDefinition, LoopExitReason, LoopRunRecord, LoopRunStepResult, LoopStep } from "./types.js";
 
+// [2026-08-10] 문구 정교화. 기존 "외부 발신·전송·결제·삭제 금지"는 발송이 임무인 스텝과 정면 충돌한다
+// (anandara-daily-notify/run-notifications = 텔레그램 발송, daily-repo-discovery/crew-comments = 라운지 게시).
+// 워커가 문구를 따르면 매일 09:00 알림이 조용히 끊긴다. 그래서 행위 위험도로 문구를 쪼갠다:
+//   - 되돌릴 수 없는 행위(결제·삭제·파괴적 변경) → 예외 없이 금지. 프롬프트로 못 푼다.
+//     (루프 owner가 genie인 경우가 있어, 프롬프트발 위임 사슬을 금전·파괴까지 확장하면 안 된다.)
+//   - 임무가 될 수 있는 행위(발신·전송) → 스텝 지시가 명시한 대상·채널·수단으로 범위 한정.
+// 발송 금지에 스텝 단위 예외 플래그를 쓰지 않은 이유: 스텝 프롬프트가 이미 발송 대상을 서술하므로
+// 플래그는 그 사본이 되어 드리프트한다.
+// (2026-08-11 b7f384f가 /loops/**의 YAML을 실제로 수정했다 — "쓰기 권한자가 없다"던 옛 주석은
+//  사실이 아니어서 걷어냈다. 산출물 억제는 실제로 step.skip_output 플래그로 처리하고 있다.)
+// 이 문구는 lines[0]에 놓이고 step.prompt가 lines[1]이므로 "아래 스텝 지시"가 실제 배치와 일치한다.
 const DRAFT_ONLY_NOTICE =
-  "**[루프 정책] 외부 발신·전송·결제·삭제 금지. 모든 산출물은 초안으로만 저장.**";
+  "**[루프 정책] 결제·구매·자금 이동·데이터 삭제·파괴적 변경은 예외 없이 금지. " +
+  "외부 발신·전송은 아래 스텝 지시가 명시적으로 요구한 대상·채널·수단에 한해서만 수행하고, " +
+  "그 밖의 임의 발신·수신자 추가·범위 확대는 금지. 그 외 산출물은 초안으로만 저장.**";
 
 function modelTierGuidance(tier?: LoopStep["model_tier"]): string {
   if (!tier) return "";
@@ -23,7 +36,9 @@ function modelTierGuidance(tier?: LoopStep["model_tier"]): string {
   return `\n(모델 등급 가이드: ${label} — 이 등급에 맞는 노력 수준으로 작업하세요.)`;
 }
 
-function buildStepPrompt(def: LoopDefinition, step: LoopStep, iteration?: number): string {
+// export는 테스트 seam이다. 이 함수의 출력(안전 문구 + 산출물 지시)은 실행 중인 서버를 통해서만
+// 관측 가능해 검증이 불가능했다 — 판정식을 프로브에서 재구현하면 원 진단이 빠졌던 함정을 반복한다.
+export function buildStepPrompt(def: LoopDefinition, step: LoopStep, iteration?: number): string {
   const lines: string[] = [];
   if (def.approval?.mode !== "auto") {
     lines.push(DRAFT_ONLY_NOTICE);
@@ -35,10 +50,52 @@ function buildStepPrompt(def: LoopDefinition, step: LoopStep, iteration?: number
   }
   const tierGuidance = modelTierGuidance(step.model_tier);
   if (tierGuidance) lines.push(tierGuidance);
+  // [2026-08-10] 산출물이 본질인 스텝(skip_output:false) 보강.
+  // 직접 위임 경로는 아래 body의 skipOutput 필드로 해결되지만, 지니 경유/폴백 경로는
+  // 지니가 DelegateTask를 대신 호출하므로 필드를 전달할 방법이 없다 → 프롬프트로 명시한다.
+  if (step.skip_output === false) {
+    lines.push(
+      "\n[산출물 필수] 이 작업의 결과는 반드시 파일로 저장하세요. 다른 직원에게 재위임할 때는 DelegateTask에 skipOutput: false 를 명시하세요.",
+    );
+  }
   if (iteration !== undefined) {
     lines.push(`\n(완료까지 반복 — ${iteration}번째 시도)`);
   }
   return lines.join("\n");
+}
+
+// 직접 위임 HTTP 호출. export는 테스트 seam이다 — buildStepPrompt와 같은 이유이되 한 겹 더 깊다.
+// [2026-08-10 QA F1] 이 본문(skipOutput/request)을 테스트에서 재계산하면 항등식이 되어
+// 전달 로직을 통째로 망가뜨려도 통과한다(실증: skipOutput을 true 상수로 고정해도 61/61 PASS).
+// fetch를 seam 안에 포함시킨 이유: 객체만 반환하면 "그 객체가 실제로 전송되는가"를 못 잡는다.
+// 테스트는 globalThis.fetch를 스텁해 실제 전송 body 바이트를 관측한다.
+export async function dispatchDirectDelegate(
+  def: LoopDefinition,
+  step: LoopStep,
+  agentId: string,
+  instanceId: string,
+): Promise<{ ok: boolean; status: number; jobId?: string }> {
+  const port = process.env.PORT ?? "3456";
+  const leaseSec = def.budget?.max_duration_minutes ? Math.min(def.budget.max_duration_minutes * 60, 3600) : undefined;
+  const res = await fetch("http://127.0.0.1:" + port + "/api/delegate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      // [2026-08-10] step.prompt(원본) → buildStepPrompt 결과로 교정.
+      // 기존에는 draft_only 경고·state_files 안내·model_tier 가이드가 직접 위임 경로에서 통째로 누락됐다.
+      request: buildStepPrompt(def, step),
+      agent: agentId,
+      planGate: false,
+      // 미지정 시 true(억제) — /api/delegate 기존 기본값 유지. YAML에서 skip_output:false인 스텝만 산출물 허용.
+      skipOutput: step.skip_output ?? true,
+      taskId: instanceId,
+      taskTitle: "[루프 " + def.id + "] " + step.id,
+      ...(leaseSec ? { leaseSec, timeoutSec: Math.max(leaseSec - 300, 600) } : {}),
+    }),
+  });
+  if (!res.ok) return { ok: false, status: res.status };
+  const ack = await res.json() as { jobId?: string };
+  return { ok: true, status: res.status, jobId: ack.jobId };
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "outputs_missing", "failed"]);
@@ -76,26 +133,12 @@ async function runTaskStep(
   const directAgent = step.agent && step.agent !== "genie" ? getWorkerAgent(step.agent) : undefined;
   if (directAgent) {
     try {
-      const port = process.env.PORT ?? "3456";
-      const leaseSec = def.budget?.max_duration_minutes ? Math.min(def.budget.max_duration_minutes * 60, 3600) : undefined;
-      const res = await fetch("http://127.0.0.1:" + port + "/api/delegate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({
-          request: step.prompt,
-          agent: directAgent.id,
-          planGate: false,
-          taskId: instance.id,
-          taskTitle: "[루프 " + def.id + "] " + step.id,
-          ...(leaseSec ? { leaseSec, timeoutSec: Math.max(leaseSec - 300, 600) } : {}),
-        }),
-      });
-      if (res.ok) {
-        const ack = await res.json() as { jobId?: string };
+      const ack = await dispatchDirectDelegate(def, step, directAgent.id, instance.id);
+      if (ack.ok) {
         jobId = ack.jobId;
         console.log("[Loop:" + def.id + "] 직접 위임 → " + directAgent.id + " (job " + jobId + ")");
       } else {
-        console.warn("[Loop:" + def.id + "] 직접 위임 실패(" + res.status + ") — 지니 경유 폴백");
+        console.warn("[Loop:" + def.id + "] 직접 위임 실패(" + ack.status + ") — 지니 경유 폴백");
       }
     } catch (err) {
       console.warn("[Loop:" + def.id + "] 직접 위임 오류 — 지니 경유 폴백:", err instanceof Error ? err.message : err);
@@ -179,6 +222,13 @@ export async function runLoop(def: LoopDefinition, trigger: "cron" | "manual"): 
   const startedAt = new Date().toISOString();
   const startedAtMs = Date.now();
   const state = loadState(def.id);
+
+  // [2026-08-15 P0 F-3] 지난 달 예산 자동 정지 해제 — checkPreRun은 순수 검사 함수이므로
+  // 상태 변경·영속화는 호출부인 여기서 한다. (수동 실행 경로는 checkLoops를 거치지 않는다.)
+  if (clearStaleBudgetPause(state)) {
+    saveState(def.id, state);
+    console.log(`[Loop:${def.id}] 월 롤오버 — 예산 자동 정지 해제 (지난달 지출 $${(state.monthSpend?.usd ?? 0).toFixed(2)})`);
+  }
 
   const preCheck = checkPreRun(def, state);
   if (!preCheck.ok) {

@@ -8,7 +8,9 @@
 
 import { randomUUID } from "node:crypto";
 import { basename, join, isAbsolute } from "node:path";
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
+import { resolveExistingArtifact } from "./utils/path-normalize.js";
+import { ARTIFACT_EXT, EXT_BOUNDARY } from "./utils/artifact-ext.js";
 import type { Job } from "../types.js";
 import { PROJECT_SELF_DIR } from "../config.js";
 import { addGenieMessage, isSelfRestartPending } from "./chat.js";
@@ -21,6 +23,62 @@ export type QaVerdict = "pass" | "fail" | "unknown";
 export interface PrecheckResult {
   pass: boolean;
   failures: string[];
+}
+
+// 산출물 실존 해석(NFC/NFD·스코프 폴백)은 ./utils/path-normalize.ts로 공용화됨.
+// requirements-ingest.ts의 nfc()와 단일 소스를 공유한다.
+
+// ── 산출물 경로 추출 정규식 공용 빌더 ──────────────────────────────
+// [핫픽스 2026-08-08] 확장자 절단 결함 수정 → [2026-08-10] 정의를 ./utils/artifact-ext.ts로 이관.
+// 같은 결함이 jobs.ts:2768에서 재발해(seen.jsonl 절단) 확장자 목록·경계 규약을 단일 소스로 모았다.
+// 절단 3기전과 (?![A-Za-z0-9])를 쓰는 이유는 그쪽 주석에 전부 남겨뒀다. 여기 값은 동작 불변.
+const ARTIFACT_PATH_BODY = "([^\\s`]+\\." + ARTIFACT_EXT + EXT_BOUNDARY + ")";
+const MD_PATH_BODY = "([^\\s`]+\\.md(?![A-Za-z0-9]))";
+
+/** 라벨(산출물:/경로: 등) 뒤 파일 경로를 잡는 전역 정규식을 만든다(매 호출 새 인스턴스 → lastIndex 상태 공유 없음). */
+function labelPathPattern(label: string, body: string = ARTIFACT_PATH_BODY): RegExp {
+  return new RegExp(label + "[:：]\\s*`?" + body, "gi");
+}
+
+/** 텍스트에서 라벨 기반 산출물 경로를 추출한다(URL 제외, 확장자 온전 보존). */
+function collectLabeledPaths(text: string, patterns: RegExp[]): string[] {
+  const out = new Set<string>();
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const p = m[1].trim();
+      if (p && !p.startsWith("http") && !p.includes("://")) out.add(p);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * 원 작업 요청에서 '명시적으로 요구된 산출물' 경로만 추출한다.
+ * 입력/참조 경로(SafeRead 대상 등)는 제외하고 산출 라벨(산출물:/보고서:)만 본다.
+ * 용도: 보고서에 산출물 경로가 0개일 때 "도구 없음/미저장" 회피 보고를 실측으로 가려내기 위함.
+ */
+function extractRequiredArtifacts(request: string): string[] {
+  return collectLabeledPaths(request, [
+    labelPathPattern("산출물"),
+    labelPathPattern("보고서", MD_PATH_BODY),
+  ]);
+}
+
+/**
+ * 작업 완료 보고서 텍스트에서 산출물 경로를 추출한다 (테스트 가능한 순수 함수).
+ * 라벨: 수정 파일/생성 파일/산출물/파일/경로/보고서.
+ * 확장자 절단 결함(.jsonl→.js 등)은 labelPathPattern 공용 빌더에서 교정됨.
+ */
+export function extractArtifactPaths(text: string): string[] {
+  return collectLabeledPaths(text, [
+    labelPathPattern("수정\\s*파일"),
+    labelPathPattern("생성\\s*파일"),
+    labelPathPattern("산출물"),
+    labelPathPattern("파일"),
+    labelPathPattern("경로"),
+    labelPathPattern("보고서", MD_PATH_BODY),
+  ]);
 }
 
 /**
@@ -49,31 +107,34 @@ export function precheckArtifacts(
     );
   }
   
-  // 1. 파일 경로 추출 패턴 (명시적 라벨 기반 — 백틱 단독 인용 제외)
-  // 긴 확장자 우선 (tsx|ts, jsx|js) — .tsx를 .ts로 잘못 매칭 방지
-  const pathPatterns = [
-    /수정\s*파일[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
-    /생성\s*파일[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
-    /산출물[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
-    /파일[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
-    /경로[:：]\s*`?([^\s`]+\.(tsx|ts|jsx|js|md|json|py|yaml|yml|sh|html|css))/gi,
-    /보고서[:：]\s*`?([^\s`]+\.md)/gi,
-  ];
+  // 1. 파일 경로 추출 (명시적 라벨 기반 — 백틱 단독 인용 제외)
+  //    확장자 절단 방지(.jsonl/.json.posted 온전 보존) 로직은 extractArtifactPaths로 공용화.
+  const paths = new Set<string>(extractArtifactPaths(text));
   
-  const paths = new Set<string>();
-  for (const pattern of pathPatterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      const p = match[1].trim();
-      // URL 제외 (http://, file:// 등)
-      if (p && !p.startsWith("http") && !p.includes("://")) {
-        paths.add(p);
-      }
-    }
-  }
-  
-  // 2. 파일 0개 → PASS (진단/리서치 작업은 보고서만 작성)
+  // 2. 파일 0개 처리
+  //    기본: 진단/리서치 작업은 보고서만 작성하므로 PASS.
+  //    단, 원 요청이 산출물을 명시적으로 요구했는데 보고서에 경로가 하나도 없으면
+  //    "파일도구가 없다"·"저장 못 했다" 류의 무검증 회피 보고일 수 있다 → 요구 경로를
+  //    실측 조회해, 하나도 실존하지 않으면 FAIL로 막는다(상위 무검증 신뢰 루프 차단).
   if (paths.size === 0) {
+    const required = extractRequiredArtifacts(job.request);
+    if (required.length === 0) {
+      return { pass: true, failures: [] };
+    }
+    const zeroBaseDir = job.cwd || PROJECT_SELF_DIR;
+    const missing: string[] = [];
+    for (const rp of required) {
+      const fp = isAbsolute(rp) ? rp : join(zeroBaseDir, rp);
+      if (!resolveExistingArtifact(fp, rp, zeroBaseDir)) missing.push(rp);
+    }
+    // 요구 산출물이 하나라도 실존하면 저장은 된 것(워커가 경로 라벨을 안 적었을 뿐) → PASS.
+    // 전부 미존재면 회피 보고로 간주 → FAIL.
+    if (missing.length === required.length) {
+      return {
+        pass: false,
+        failures: missing.map((p) => `요구된 산출물 미존재(실측 조회): ${p}`),
+      };
+    }
     return { pass: true, failures: [] };
   }
   
@@ -86,10 +147,12 @@ export function precheckArtifacts(
   for (const path of paths) {
     // 경로 해석: 절대 경로면 그대로, 상대 경로면 job.cwd 기준
     // (mycrew-photos 등 외부 프로젝트 작업 시 올바른 경로에서 검증)
-    const fullPath = isAbsolute(path) ? path : join(job.cwd || PROJECT_SELF_DIR, path);
-    
-    // 존재 검증
-    if (!existsSync(fullPath)) {
+    const baseDir = job.cwd || PROJECT_SELF_DIR;
+    const fullPath = isAbsolute(path) ? path : join(baseDir, path);
+
+    // 존재 검증 (NFC/NFD·bare 파일명 오탐 방지 폴백 포함)
+    const resolvedPath = resolveExistingArtifact(fullPath, path, baseDir);
+    if (!resolvedPath) {
       failures.push(`파일 미존재: ${path} (검증 경로: ${fullPath})`);
       continue;
     }
@@ -104,7 +167,7 @@ export function precheckArtifacts(
         if (origJob?.startedAt) baselineStartedAt = origJob.startedAt;
       }
       if (baselineStartedAt) {
-        const stat = statSync(fullPath);
+        const stat = statSync(resolvedPath);
         const startTime = new Date(baselineStartedAt);
         if (stat.mtime < startTime) {
           failures.push(

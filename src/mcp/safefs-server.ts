@@ -774,6 +774,7 @@ if (DELEGATE_URL) {
       timeoutSec: z.number().optional().describe("작업 타임아웃 초 (기본 600)"),
       leaseSec: z.number().optional().describe("Lease 만료 초 (기본 900=15분). 긴 작업일 때만 명시 — 미지정 시 기본값."),
       maxTurns: z.number().optional().describe("워커 한 턴당 최대 turns (미지정 시 에이전트 정의 기본값)"),
+      effort: z.enum(["low", "medium", "high"]).optional().describe("추론 강도. 기본 low. leaseSec/maxTurns를 기본보다 크게 준 긴 작업은 자동으로 medium이 되므로 보통 생략한다. 명시하면 자동 승격보다 우선."),
       selfRestart: z.boolean().optional().describe("self 프로젝트(이 시스템 자체) 수정 작업일 때 true. 잡 완료 후 자동 재시작 큐에 적재."),
       skipOutput: z.boolean().optional().describe("산출물 파일 생성 생략 여부. 기본값 true(생략). 보고서/분석/리서치/감사 결과가 필요한 작업이면 false를 명시적으로 지정."),
       taskId: z.string().optional().describe("소속 Task ID. 같은 사용자 지시의 후속 위임이면 첫 위임 ACK의 taskId를 전달. 미지정 시 새 Task 자동 생성."),
@@ -791,6 +792,7 @@ if (DELEGATE_URL) {
       timeoutSec?: number;
       leaseSec?: number;
       maxTurns?: number;
+      effort?: "low" | "medium" | "high";
       selfRestart?: boolean;
       skipOutput?: boolean;
       taskId?: string;
@@ -892,13 +894,14 @@ if (DELEGATE_URL) {
         request: z.string().describe("작업 내용 (구체적으로)"),
         planGate: z.boolean().optional().describe("false면 계획 단계 생략"),
         skipOutput: z.boolean().optional().describe("산출물 파일 생성 생략 여부 (기본 true)"),
+        effort: z.enum(["low", "medium", "high"]).optional().describe("추론 강도. 기본 low. 이 경로는 leaseSec/maxTurns를 받지 않아 자동 승격 신호가 없으므로, 긴 단계는 medium을 명시할 것."),
       }))).describe("작업 단계 배열. 순차=[[A],[B],[C]] / 병렬=[[A,B,C]] / 팬아웃→통합=[[A,B,C],[D]]"),
       projectName: z.string().optional().describe("프로젝트명 (전체 공통)"),
       cwd: z.string().optional().describe("작업 디렉토리 절대 경로 (전체 공통)"),
       taskId: z.string().optional().describe("기존 Task에 이어붙일 때 그 taskId (재작업 등)"),
     },
     async (input: {
-      phases: { agent?: string; request: string; planGate?: boolean; skipOutput?: boolean }[][];
+      phases: { agent?: string; request: string; planGate?: boolean; skipOutput?: boolean; effort?: "low" | "medium" | "high" }[][];
       projectName?: string;
       cwd?: string;
       taskId?: string;

@@ -28,6 +28,7 @@ import { getWorkerIdleTimeoutSec } from "../agents/genie.js";
 import { getWorkerAgent } from "../agent-registry.js";
 import { extractAndLogCost } from "./cost-extractor.js";
 import type { AgentConfig, AgentResult } from "../types.js";
+import { effortForConfig } from "./effort-policy.js";
 import { getUserTitle } from "./user-title.js";
 import { OVERLOAD_BACKOFFS_MS, isApiOverloadError, sleep, withJitter } from "../claude-error-retry.js";
 
@@ -102,7 +103,10 @@ async function buildWorkerSpawn(config: AgentConfig) {
   // --strict-mcp-config: 프로젝트/유저 .mcp.json 누수 차단 (safefs + 할당 서버만 로드).
   const cliArgs = ["--no-chrome", "--strict-mcp-config", "--mcp-config", mcpConfigPath];
   if (config.model) cliArgs.push("--model", config.model);
-  if (config.effort) cliArgs.push("--effort", config.effort);
+  // ※ 이 경로는 현재 어댑터 레지스트리(adapters/index.ts)에 pty-adapter가 등록돼 있지 않아
+  //    잡 실행에서 도달하지 않는다. 배선되면 잡 오버라이드가 config.effort로 이미 들어와 있다.
+  //    단, PTY는 agentId 단위로 재사용되므로(workerPtys) CLI 인자는 최초 spawn 시 1회만 굳는다.
+  cliArgs.push("--effort", effortForConfig(config.effort));
   // approval 모드 서버 → PreToolUse 훅(서버별 매처)으로 승인카드 라우팅 (네이티브 권한창=freeze 방지).
   // allow 모드 서버 → allowedTools에 통째 추가(승인 없이 사용).
   const hookCmd = `node "${join(PROJECT_SELF_DIR, "scripts", "mcp-approval-hook.mjs")}"`;

@@ -19,7 +19,38 @@ function currentMonthKey(): string {
   return getTodayKST().slice(0, 7);
 }
 
+/**
+ * 월간 예산 자동 정지(reason:"budget")가 "지난 달" 것인지 판정. 순수 함수 — 상태를 쓰지 않는다.
+ *
+ * [2026-08-15 P0 F-3] monthly_cap_usd는 명칭상 "월간" 한도지만 실제로는 영구 킬스위치였다.
+ * 상한 도달 → paused → checkPreRun/checkLoops가 실행을 막음 → bumpMonthSpend 미호출 →
+ * monthSpend가 월 롤오버되지 않음 → 영원히 paused. anandara-daily-notify가 26일간 무발화.
+ *
+ * 해제 대상은 reason:"budget" 뿐이다. manual·consecutive_failures는 의도적 정지이므로
+ * 달이 바뀌어도 절대 자동 해제하지 않는다 — 이 구분이 본 수정의 핵심 리스크다.
+ * monthSpend가 없으면 "지난 달 것"이라는 근거가 없으므로 해제하지 않는다(보수적).
+ * 그 경우의 탈출구는 기존 수동 resume(POST /api/loops/:id/resume)이다.
+ */
+export function isStaleBudgetPause(state: LoopState): boolean {
+  if (state.paused?.reason !== "budget") return false;
+  return state.monthSpend !== undefined && state.monthSpend.month !== currentMonthKey();
+}
+
+/**
+ * isStaleBudgetPause가 참이면 정지를 해제한다. 영속화(saveState)는 호출부 책임이다 —
+ * checkPreRun을 순수 검사 함수로 유지하려고 해제를 호출부로 뺐다.
+ * 호출부는 둘뿐이다: loops/index.ts(cron 게이트 앞) · runner.ts(checkPreRun 앞).
+ * 두 곳 모두 필요하다 — cron 경로는 checkPreRun에 도달조차 하지 않는다(index.ts:84가 먼저 막는다).
+ * @returns 해제했으면 true (호출부가 이 값으로 saveState 여부를 정한다)
+ */
+export function clearStaleBudgetPause(state: LoopState): boolean {
+  if (!isStaleBudgetPause(state)) return false;
+  state.paused = undefined;
+  return true;
+}
+
 export function checkPreRun(def: LoopDefinition, state: LoopState): { ok: boolean; reason?: string } {
+  // 무조건 차단이 맞다. 지난 달 예산 정지의 해제는 호출부가 clearStaleBudgetPause로 먼저 수행한다.
   if (state.paused) {
     return { ok: false, reason: `일시정지 상태 (${state.paused.reason}, ${state.paused.at})` };
   }

@@ -18,6 +18,7 @@ import {
   parseApprovalCallbackData, decideApprovalCallbackBranch,
   type PairingState, type ApprovalCallbackAction,
 } from "./telegram.js";
+import type { HistoryTurn } from "./telegram-triage.js";
 
 // ============================================================
 // 상수
@@ -197,9 +198,30 @@ export function splitDiscordMessage(text: string, chunkSize: number = SEND_CHUNK
 // 지니에게 전달할 프롬프트 빌더
 // ============================================================
 
-function buildDiscordPrompt(channelId: string, username: string, text: string): string {
+// 최근 대화 블록 상한 — 원 6턴 요구 + 총 길이 상한(오래된 것부터 절삭)
+const PROMPT_HISTORY_MAX_TURNS = 6;
+const PROMPT_HISTORY_MAX_CHARS = 1200;
+
+function buildHistoryBlock(turns: HistoryTurn[]): string {
+  const recent = turns.slice(-PROMPT_HISTORY_MAX_TURNS);
+  const kept: string[] = [];
+  let total = 0;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const t = recent[i];
+    const line = `${t.role === "user" ? "사장님" : "지니"}: ${t.text}`;
+    if (total + line.length > PROMPT_HISTORY_MAX_CHARS) break;
+    kept.unshift(line);
+    total += line.length;
+  }
+  if (kept.length === 0) return "";
+  return [`[이 채널 최근 대화]`, ...kept].join("\n");
+}
+
+function buildDiscordPrompt(channelId: string, username: string, text: string, historyTurns: HistoryTurn[] = []): string {
+  const historyBlock = buildHistoryBlock(historyTurns);
   return [
     `[디스코드] ${username}(channelId: ${channelId})님이 보낸 사장님 지시입니다.`,
+    ...(historyBlock ? ["", historyBlock] : []),
     ``,
     text,
     ``,
@@ -360,20 +382,29 @@ export async function sendDiscordNotice(text: string): Promise<void> {
 
 const NOTICE_THROTTLE_MS = 10_000;
 
+const NOTICE_SUMMARY_MAX = 5; // 리스트에 보존할 최대 건수 — 초과분은 "…외 N건"으로 뭉침 (2000자 제한 보호)
+const NOTICE_SUMMARY_LINE_LEN = 80;
+
 interface NoticeThrottleState {
   lastSentAt: number;
   pendingCount: number;
+  pendingSummaries: string[]; // 억제된 건들의 첫 줄 요약 — 스로틀에 뭉개져도 본문이 완전히 사라지지 않게 보존
   timer: ReturnType<typeof setTimeout> | null;
 }
 
 const noticeThrottleMap = new Map<string, NoticeThrottleState>();
 
-/** 카테고리별 10초당 1건만 즉시 발송, 그 사이 건은 "외 N건"으로 합산해 지연 발송. */
+function summarizeNoticeLine(text: string): string {
+  const firstLine = text.split("\n")[0] ?? "";
+  return firstLine.length > NOTICE_SUMMARY_LINE_LEN ? firstLine.slice(0, NOTICE_SUMMARY_LINE_LEN) + "…" : firstLine;
+}
+
+/** 카테고리별 10초당 1건만 즉시 발송, 그 사이 건은 각 건 첫 줄 요약을 리스트로 보존해 지연 발송(2000자 상한 준수). */
 export function sendDiscordNoticeThrottled(category: string, text: string): void {
   const now = Date.now();
   let state = noticeThrottleMap.get(category);
   if (!state) {
-    state = { lastSentAt: 0, pendingCount: 0, timer: null };
+    state = { lastSentAt: 0, pendingCount: 0, pendingSummaries: [], timer: null };
     noticeThrottleMap.set(category, state);
   }
 
@@ -381,6 +412,7 @@ export function sendDiscordNoticeThrottled(category: string, text: string): void
   if (elapsed >= NOTICE_THROTTLE_MS) {
     state.lastSentAt = now;
     state.pendingCount = 0;
+    state.pendingSummaries = [];
     void sendDiscordNotice(text).catch((err) => {
       console.warn("[Discord] 스로틀 알림 발송 실패:", err instanceof Error ? err.message : err);
     });
@@ -388,7 +420,9 @@ export function sendDiscordNoticeThrottled(category: string, text: string): void
   }
 
   state.pendingCount += 1;
+  state.pendingSummaries.push(summarizeNoticeLine(text));
   const suppressedCount = state.pendingCount;
+  const summaries = state.pendingSummaries;
   const lastText = text;
   if (state.timer) clearTimeout(state.timer);
   const delay = NOTICE_THROTTLE_MS - elapsed;
@@ -397,9 +431,19 @@ export function sendDiscordNoticeThrottled(category: string, text: string): void
     if (!s) return;
     s.lastSentAt = Date.now();
     s.pendingCount = 0;
+    s.pendingSummaries = [];
     s.timer = null;
-    const suffix = suppressedCount > 1 ? ` (외 ${suppressedCount - 1}건)` : "";
-    void sendDiscordNotice(`${lastText}${suffix}`).catch((err) => {
+    let combined = lastText;
+    if (suppressedCount > 1) {
+      const shown = summaries.slice(0, NOTICE_SUMMARY_MAX);
+      const extra = summaries.length - shown.length;
+      const list = shown.map((line) => `· ${line}`).join("\n");
+      combined = `${lastText}\n\n(뭉개진 ${suppressedCount - 1}건)\n${list}${extra > 0 ? `\n…외 ${extra}건` : ""}`;
+      if (combined.length > DISCORD_MSG_LIMIT - 50) {
+        combined = combined.slice(0, DISCORD_MSG_LIMIT - 53) + "...";
+      }
+    }
+    void sendDiscordNotice(combined).catch((err) => {
       console.warn("[Discord] 스로틀 알림(지연) 발송 실패:", err instanceof Error ? err.message : err);
     });
   }, delay);
@@ -596,8 +640,8 @@ async function handleCommand(channelId: string, guildId: string | null, username
 // 인바운드 메시지 처리 (페어링/rate-limit/트리아지/relay)
 // ============================================================
 
-async function relayToGenie(channelId: string, username: string, text: string): Promise<void> {
-  const prompt = buildDiscordPrompt(channelId, username, text);
+async function relayToGenie(channelId: string, username: string, text: string, historyTurns: HistoryTurn[] = []): Promise<void> {
+  const prompt = buildDiscordPrompt(channelId, username, text, historyTurns);
   try {
     const { enqueueInternal } = await import("./genie-queue.js");
     const r = enqueueInternal(prompt, `discord:${channelId}`);
@@ -636,15 +680,21 @@ async function handleIncomingMessage(channelId: string, guildId: string | null, 
   try {
     const triage = await import("./telegram-triage.js");
     if (!triage.isTriageEnabled()) {
-      await relayToGenie(channelId, username, trimmed);
+      // 트리아지 비활성이어도 채널 대화 연속성은 유지한다 — 지니 회신은 REPLY_TO_DISCORD 마커 경로로
+      // 분리돼 있어 이 지점에서 모델 turn으로 캡처할 수 없지만, 사장님 발화는 남겨 다음 메시지의 맥락이 된다.
+      const historyState = triage.getOrCreateDesktopHistory(`discord:${channelId}`);
+      const priorTurns = [...historyState.turns];
+      triage.pushHistoryTurn(historyState, { role: "user", text: trimmed });
+      await relayToGenie(channelId, username, trimmed, priorTurns);
       return;
     }
 
     const classification = triage.classifyMessage(trimmed);
     if (classification.route === "genie") {
       const historyState = triage.getOrCreateDesktopHistory(`discord:${channelId}`);
+      const priorTurns = [...historyState.turns];
       triage.pushHistoryTurn(historyState, { role: "user", text: `${classification.strippedText} (지니에게 전달됨)` });
-      await relayToGenie(channelId, username, classification.strippedText);
+      await relayToGenie(channelId, username, classification.strippedText, priorTurns);
       return;
     }
 
@@ -653,13 +703,14 @@ async function handleIncomingMessage(channelId: string, guildId: string | null, 
 
     if (!result.ok) {
       console.warn(`[Discord] 보조 AI 호출 실패 (channelId=${channelId}), 지니로 폴백:`, result.error);
-      await relayToGenie(channelId, username, classification.strippedText);
+      await relayToGenie(channelId, username, classification.strippedText, [...historyState.turns]);
       return;
     }
 
     if (result.escalate) {
+      const priorTurns = [...historyState.turns];
       triage.pushHistoryTurn(historyState, { role: "user", text: `${classification.strippedText} (지니에게 전달됨)` });
-      await relayToGenie(channelId, username, classification.strippedText);
+      await relayToGenie(channelId, username, classification.strippedText, priorTurns);
       return;
     }
 

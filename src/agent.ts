@@ -11,7 +11,8 @@ import { safeKill } from "./server/utils/platform.js";
 import { OVERLOAD_BACKOFFS_MS, isApiOverloadError, sleep, withJitter } from "./claude-error-retry.js";
 import { startAgentSpan } from "./server/otel-trace.js";
 import { listManifests } from "./server/app-registry.js";
-import { getMcpServerDef } from "./server/mcp-registry.js";
+import { buildMcpServerEntry, getMcpServerDef, resolveCommandPath } from "./server/mcp-registry.js";
+import { resolveEffort } from "./server/effort-policy.js";
 
 export interface RunAgentOptions {
   cwd?: string;
@@ -24,6 +25,8 @@ export interface RunAgentOptions {
   onSpawn?: (pid: number) => void;
   /** 이 호출에 한해 모델 오버라이드 (config.model보다 우선) — 경량 내부 알림 콜용 */
   model?: string;
+  /** 이 호출에 한해 effort 오버라이드 (config.effort보다 우선). 잡 단위 지정은 jobs.ts가 config에 주입한다. */
+  effort?: string;
   /** 토큰 단위 부분 델타 스트리밍 (--include-partial-messages). onText가 있을 때만 유효. */
   partialStream?: boolean;
 }
@@ -38,21 +41,37 @@ const TOOL_LABELS: Record<string, string> = {
   mcp__safefs__SafeBash: "명령 실행 중",
 };
 
-function describeToolUse(tool: string, input: Record<string, unknown>): string {
+// 도구 인자 중 "값"에 해당하는 것(검색 패턴·명령 인자·질의·프롬프트·URL 쿼리)은
+// 진행 로그와 OTel 스팬에 원문으로 남기지 않는다.
+// WHY: 이 함수가 만든 문자열 하나가 jobs.json(onProgress)과 otel-spans.jsonl(addToolSpan)
+// 양쪽에 그대로 기록된다. 그래서 비밀값을 찾으려고 Grep을 돌리면 그 검색어가 상태 파일에
+// 새로 심긴다 — 청소 행위가 오염을 만든다(2026-08-08 실사고, ingest-crab 발견).
+// 길이도 단서가 되므로 `<...:N chars>` 같은 형태를 쓰지 않고 고정 문자열로 가린다.
+// 경로는 위치 정보라 남긴다(진행 표시가 무의미해지지 않도록) — 다만 URL은 쿼리스트링을 자른다.
+const REDACTED_ARG = "<redacted>";
+
+export function describeToolUse(tool: string, input: Record<string, unknown>): string {
   const label = TOOL_LABELS[tool] || `${tool} 실행 중`;
-  if (tool === "Read" && input.file_path) return `${label}: ${String(input.file_path).slice(-60)}`;
-  if (tool === "Write" && input.file_path) return `${label}: ${String(input.file_path).slice(-60)}`;
-  if (tool === "Edit" && input.file_path) return `${label}: ${String(input.file_path).slice(-60)}`;
-  if (tool === "Grep" && input.pattern) return `${label}: "${String(input.pattern).slice(0, 40)}" ${input.path ? `in ${String(input.path).slice(-40)}` : ''}`;
-  if (tool === "Glob" && input.pattern) return `${label}: ${String(input.pattern).slice(0, 40)}`;
-  if (tool === "Bash" && input.command) return `${label}: ${String(input.command).slice(0, 60)}`;
-  if (tool === "WebSearch" && input.query) return `${label}: ${String(input.query).slice(0, 40)}`;
-  if (tool === "WebFetch" && input.url) return `${label}: ${String(input.url).slice(0, 60)}`;
-  if (tool === "Agent" && input.prompt) return `${label}: ${String(input.prompt).slice(0, 40)}`;
-  // MCP SafeFS 도구
-  if (input.path) return `${label}: ${String(input.path).slice(-60)}`;
-  if (input.pattern) return `${label}: ${String(input.pattern).slice(0, 40)}`;
-  if (input.command) return `${label}: ${String(input.command).slice(0, 60)}`;
+  const tail = (v: unknown, n = 60): string => String(v).slice(-n);
+  /** 명령은 실행 파일명(첫 토큰)만 남기고 인자를 가린다 — 인자에 토큰·비밀번호가 실린다. */
+  const cmdHead = (v: unknown): string => {
+    const head = String(v).trim().split(/\s+/)[0] ?? "";
+    return `${head.slice(-40)} ${REDACTED_ARG}`;
+  };
+
+  if (tool === "Read" && input.file_path) return `${label}: ${tail(input.file_path)}`;
+  if (tool === "Write" && input.file_path) return `${label}: ${tail(input.file_path)}`;
+  if (tool === "Edit" && input.file_path) return `${label}: ${tail(input.file_path)}`;
+  if (tool === "Grep" && input.pattern) return `${label}: ${REDACTED_ARG}${input.path ? ` in ${tail(input.path, 40)}` : ''}`;
+  if (tool === "Glob" && input.pattern) return `${label}: ${REDACTED_ARG}`;
+  if (tool === "Bash" && input.command) return `${label}: ${cmdHead(input.command)}`;
+  if (tool === "WebSearch" && input.query) return `${label}: ${REDACTED_ARG}`;
+  if (tool === "WebFetch" && input.url) return `${label}: ${tail(String(input.url).split("?")[0])}`;
+  if (tool === "Agent" && input.prompt) return `${label}: ${REDACTED_ARG}`;
+  // MCP SafeFS 도구 — path는 위치라 유지, pattern/command는 값이라 가린다
+  if (input.path) return `${label}: ${tail(input.path)}`;
+  if (input.pattern) return `${label}: ${REDACTED_ARG}`;
+  if (input.command) return `${label}: ${cmdHead(input.command)}`;
   return label;
 }
 
@@ -163,6 +182,27 @@ export function permissionModeFor(level: string | undefined): "bypassPermissions
 
 // 도구 권한 args — runAgent(-p 워커)와 spawnPty(마이크루 PTY)가 공유. (Phase2 신규 PTY 파일 호환)
 // 경로가 갈라지면 권한 누락 회귀가 생기므로 한 곳에서 빌드한다.
+/**
+ * 도구 0 상태 조기 차단 — 실패가 성공으로 집계되는 경로를 막는다.
+ *
+ * 권한 미설정(allowedTools=[] + readPaths/writePaths 미설정)이면 safefs MCP 서버가 아예
+ * 부착되지 않는데 --disallowedTools(Read,Write,Bash…)는 무조건 전달된다. 결과는
+ * "도구를 뺏고 대체재도 안 주는" 상태 — 워커는 아무 파일도 못 만지면서 텍스트만 반환하고,
+ * 잡은 completed로 마감돼 실패가 조용히 은폐된다.
+ * (2026-08-08 자동등재 11명 사고. 2026-08-06 회고 직원 '저장 실패'의 진짜 원인도 이것이다.)
+ *
+ * 여기서 던져야 jobs.ts 재시도 루프가 잡을 failed로 마감하고 사유를 남긴다.
+ * 도입 전 전 직원(29명) 스캔으로 오탐 0(TOOLSET_EMPTY_COUNT=0)을 확인했다.
+ */
+function assertToolsetNotEmpty(config: AgentConfig, mcpTools: string[]): void {
+  if (mcpTools.length > 0 || config.allowedTools.length > 0) return;
+  throw new Error(
+    `toolset-empty: ${config.role}(${config.name}) — 권한 미설정으로 가용 도구가 0개입니다. `
+    + `history/agents.json 또는 config/agents/${config.role}/meta.json에 `
+    + `allowedTools / readPaths / writePaths 중 하나 이상을 설정하세요.`,
+  );
+}
+
 export function buildPermissionArgs(config: AgentConfig, opts?: { interactive?: boolean; hooks?: Record<string, unknown>; extraAllowedTools?: string[] }): string[] {
   const args: string[] = [];
   if (!opts?.interactive) {
@@ -203,6 +243,7 @@ export function buildPermissionArgs(config: AgentConfig, opts?: { interactive?: 
     const _def = getMcpServerDef(_mcpName);
     if (_def && _def.mode === "allow") mcpTools.push(`mcp__${_mcpName}`);
   }
+  assertToolsetNotEmpty(config, mcpTools);
   const effectiveAllowedTools = mcpTools.length > 0
     ? [...config.allowedTools.filter(t => !["DelegateTask", "SendToPartner", "RequestPartnership", "RotatePartnerToken", "UpdateMyProfile"].includes(t)), ...mcpTools]
     : config.allowedTools;
@@ -270,9 +311,11 @@ export async function runAgent(
     args.push("--model", model);
     console.log(`[${config.name}] model: ${model}${options.model ? " (call override)" : ""}`);
   }
-  if (config.effort) {
-    args.push("--effort", config.effort);
-  }
+  // effort — 미지정 시 코드 기본값 low. 세 조립 지점(여기·worker-pty·terminal-ws)이
+  // 같은 함수를 부르므로 경로마다 값이 갈라질 수 없다. effort-policy.ts 주석 참고.
+  const effort = resolveEffort({ jobEffort: options.effort, configEffort: config.effort }).effort;
+  args.push("--effort", effort);
+  console.log(`[${config.name}] effort: ${effort}${options.effort ? " (call override)" : ""}`);
   // MCP 하이브리드: writePaths/readPaths 있는 에이전트는 MCP 도구만 허용하고 내장 Read/Write/Edit 차단
   // (CLI 권한 엔진 비결정성 우회 — MCP 진입점에서 결정적 path 검증)
   const hasWritePaths = (config.writePaths?.length ?? 0) > 0;
@@ -289,6 +332,7 @@ export async function runAgent(
   if (config.allowedTools.includes("RequestPartnership")) mcpTools.push("mcp__safefs__RequestPartnership");
   if (config.allowedTools.includes("RotatePartnerToken")) mcpTools.push("mcp__safefs__RotatePartnerToken");
 
+  assertToolsetNotEmpty(config, mcpTools);
   const effectiveAllowedTools = mcpTools.length > 0
     ? [...config.allowedTools.filter(t => !["DelegateTask", "SendToPartner", "RequestPartnership", "RotatePartnerToken"].includes(t)), ...mcpTools]
     : [...config.allowedTools];
@@ -370,7 +414,7 @@ export async function runAgent(
         },
     };
     if (config.enablePlaywright === true) {
-      mcpServers.playwright = { command: "npx", args: ["@playwright/mcp@latest", "--headless"] };
+      mcpServers.playwright = resolveCommandPath("playwright", "npx", ["-y", "@playwright/mcp@latest", "--headless"]);
     }
     const mcpConfig = { mcpServers };
     // legal-counsel 전용: 한국 법령/판례 조회 MCP(korean-law-mcp).
@@ -416,11 +460,16 @@ export async function runAgent(
       let _cmd: string = _def.command;
       let _args: string[] = _def.args ? [..._def.args] : [];
       // npx/npm 기반 서버는 node.exe 직접 실행으로 변환(PATH·셸 비의존, Windows spawn 안정).
-      if (_cmd === "npx" || _cmd === "npm" || _cmd === "npx.cmd" || _cmd === "npm.cmd") {
-        const _resolved = resolveNpxToNode(_args);
-        if (_resolved) { _cmd = _resolved.command; _args = _resolved.args; }
+      // 1순위: 로컬 node_modules에 설치돼 있으면 그 bin (다운로드 없음).
+      const _local = (_cmd === "npx" || _cmd === "npm" || _cmd === "npx.cmd" || _cmd === "npm.cmd")
+        ? resolveNpxToNode(_args) : null;
+      if (_local) { _cmd = _local.command; _args = _local.args; }
+      else {
+        // 2순위: 공용 해석기 — npx-cli.js 직접 호출 / cmd 래퍼 제거 / PATH·~/.claude.json 조회.
+        const _resolved = resolveCommandPath(_mcpName, _cmd, _args);
+        _cmd = _resolved.command; _args = _resolved.args;
       }
-      (mcpConfig.mcpServers as Record<string, unknown>)[_mcpName] = { command: _cmd, args: _args, ...(_def.env ? { env: _def.env } : {}) };
+      (mcpConfig.mcpServers as Record<string, unknown>)[_mcpName] = buildMcpServerEntry(_cmd, _args, _def);
     }
     mcpConfigPath = getOrCreateMcpConfigPath(JSON.stringify(mcpConfig), config.role);
     args.push("--mcp-config", mcpConfigPath);
@@ -461,6 +510,16 @@ export async function runAgent(
       cacheReadTokens: parsed.usage?.cache_read_input_tokens ?? 0,
       cacheCreateTokens: parsed.usage?.cache_creation_input_tokens ?? 0,
       durationMs: typeof parsed.duration_ms === "number" ? parsed.duration_ms : 0,
+      // 이 호출이 실제로 CLI 에 넘긴 모델(--model). logCost 가 `...cost` 로 펼쳐
+      // cost-log.jsonl 에 그대로 적재되고, agent-model-usage.ts 가 읽는다.
+      //
+      // 왜 필요한가: 모델 정책(internal-source-tier 등)의 라이브 검증이 그동안 단가 지문
+      // 역추정에 의존했다. 지문은 "이 행이 싼 모델이었다"까지만 말하고 "어느 발화였다"를
+      // 말하지 못해 3회 연속 판정 불가로 끝났다. 여기서 모델명을 직접 남긴다.
+      //
+      // ⚠️ 미지정(에이전트 기본 모델 사용)은 반드시 undefined 로 남긴다. 항상 채우면
+      // "기본 모델 유지" 축의 음성 대조가 통째로 무의미해진다.
+      model: model ?? undefined,
     };
 
     const subtype = typeof parsed.subtype === "string" ? parsed.subtype : "";

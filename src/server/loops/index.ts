@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { CronExpressionParser } from "cron-parser";
 import { addGenieMessage } from "../chat.js";
 import { loadLoops } from "./loader.js";
+import { clearStaleBudgetPause } from "./budget.js";
 import { loadState, saveState } from "./ledger.js";
 import { runLoop } from "./runner.js";
 import { DEFAULT_REVIEW_AFTER_DAYS, MAX_CONCURRENT_LOOP_RUNS, type LoopDefinition } from "./types.js";
@@ -81,6 +82,13 @@ export async function checkLoops(): Promise<void> {
       if (def.enabled === false) continue;
 
       const state = loadState(def.id);
+      // [2026-08-15 P0 F-3] 지난 달 예산 자동 정지는 여기서 푼다.
+      // ★ 이 게이트가 cron 경로의 실제 차단 지점이다 — runLoop()/checkPreRun()보다 앞서므로
+      //   budget.ts만 고치면 cron 루프는 그대로 영구 정지로 남는다.
+      if (clearStaleBudgetPause(state)) {
+        saveState(def.id, state);
+        console.log(`[LoopEngine] 월 롤오버 — 루프 "${def.id}" 예산 자동 정지 해제 (지난달 지출 $${(state.monthSpend?.usd ?? 0).toFixed(2)})`);
+      }
       if (state.paused) continue;
 
       if (runExpiryCheckThisTick) {

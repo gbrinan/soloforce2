@@ -11,6 +11,8 @@
 // - 이 모듈은 순수 로직 + 네트워크 호출만 담당. Job 타입/스토어(jobs.ts)에 대한 의존은 최소화(구조적 타입으로 받음).
 
 import { callGeminiFlash, isTriageEnabled } from "./telegram-triage.js";
+// type-only import — 런타임 의존 없음(위 "스토어 의존 최소화" 원칙 유지).
+import type { JobStatus } from "../types.js";
 
 /** processCallback에서 넘겨주는 최소 정보 — Job 전체 대신 게이팅에 필요한 필드만 구조적으로 정의. */
 export interface JobNotifyGateInput {
@@ -147,6 +149,23 @@ export interface BatchedNotifyItem {
   requestPreview: string;
   statusText: string;
   summary: string;
+  /** 종결 상태 원본. 배치의 저가/기본 모델 분기(notifySourceForBatch)에 쓴다. */
+  status: JobStatus;
+}
+
+/**
+ * 배치 → 마이크루 발화 source 판정. **보수 판정이다.**
+ *
+ * 전건이 `completed` 일 때만 `job:notify:ok`(저가 티어)로 보낸다.
+ * `failed`/`outputs_missing`/그 외 어떤 상태든 하나라도 섞이면 배치 전체를 `job:notify:fail` 로 보낸다.
+ * `outputs_missing` 은 보고 서식 검사 실패지 작업 실패는 아니지만, 재발주 판단이 필요하므로 :fail 쪽이다.
+ *
+ * 성공 건이 비싼 모델을 타는 손해는 감수하고, 실패가 싼 모델로 새는 것은 원천 차단한다.
+ * 빈 배열은 도달하지 않지만(enqueue 가 length>0 일 때만 flush) 안전 쪽인 :fail 로 둔다.
+ */
+export function notifySourceForBatch(items: BatchedNotifyItem[]): "job:notify:ok" | "job:notify:fail" {
+  if (items.length === 0) return "job:notify:fail";
+  return items.every((it) => it.status === "completed") ? "job:notify:ok" : "job:notify:fail";
 }
 
 const DEFAULT_DEBOUNCE_MS = 7_000; // 5~10초 창 — 여러 잡이 근접 완료될 때(루프 스텝, 병렬 위임 등) 코일레싱
