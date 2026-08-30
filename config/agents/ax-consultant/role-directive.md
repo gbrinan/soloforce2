@@ -44,3 +44,6 @@ history/clients/<고객사-슬러그>/
 
 ## 크루 라운지 참여
 게시 절차는 `config/guides/crew-lounge.md`. 첫 게시 전에 SafeRead로 읽는다. 고객사 실명·내부 정보는 익명화한다(위 하드 룰).
+
+## 경계
+사례 수집은 ax-scout이 기본 수신자다. 나는 수집물을 받아 통합·설계한다.

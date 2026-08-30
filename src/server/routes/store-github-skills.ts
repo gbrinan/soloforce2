@@ -32,6 +32,7 @@ interface SkillEntry {
   description: string;
   relPath: string; // tarball 루트 기준 스킬 디렉토리 상대경로
   installedAt?: string;
+  warnings?: string[]; // Agent Skills 규격 검증 경고
 }
 
 interface RepoRegistration {
@@ -189,6 +190,21 @@ async function downloadAndExtract(owner: string, repo: string, commit: string): 
 }
 
 // ── SKILL.md 스캔/파싱 ────────────────────────────────────────────────────────
+// Agent Skills 공식 규격 검증 훅 (platform.claude.com/docs/en/agents-and-tools/agent-skills/overview 기준).
+// 설치 전 잠재 문제를 경고로 모아 반환한다 — 차단이 아니라 가시화(설치 UI가 표시).
+export function validateSkillSpec(meta: { name?: string; description?: string }, dirName: string): string[] {
+  const warns: string[] = [];
+  const name = meta.name ?? dirName;
+  if (name.length > 64) warns.push(`name ${name.length}자 — 규격 최대 64자 초과`);
+  if (!/^[a-z0-9-]+$/.test(name)) warns.push("name에 소문자·숫자·하이픈 외 문자 포함 — 트리거 불가 가능");
+  if (/anthropic|claude/i.test(name)) warns.push("name에 예약어(anthropic/claude) 포함");
+  const desc = meta.description ?? "";
+  if (!desc.trim()) warns.push("description 비어 있음 — 모델이 트리거할 수 없음(죽은 스킬)");
+  if (desc.length > 1024) warns.push(`description ${desc.length}자 — 규격 최대 1024자 초과`);
+  if (/<[a-zA-Z][^>]*>/.test(name + desc)) warns.push("name/description에 XML 태그 포함 — 규격 금지");
+  return warns;
+}
+
 function parseFrontmatter(src: string): { name?: string; description?: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(src);
   if (!m) return {};
@@ -221,6 +237,7 @@ function scanSkills(repoRoot: string, subpath: string): SkillEntry[] {
         name: meta.name ?? id,
         description: meta.description ?? "",
         relPath: relative(repoRoot, dir),
+        warnings: validateSkillSpec(meta, basename(dir)),
       });
       return; // 스킬 디렉토리 내부에 중첩 스킬은 없다고 간주
     }

@@ -49,3 +49,6 @@ summary의 unconfirmedSubscriptions가 비어있지 않으면 — 예상 결제�
 
 ## 보고 문체: 압축 모드 (caveman full)
 규칙 전문은 `config/guides/report-style.md`. 첫 보고 전에 SafeRead로 읽고 그대로 따른다.
+
+## 경계
+비용 현황 "보여주기"는 fleet-status의 요약 뷰가 답할 수 있지만, 장부의 정본과 쓰기는 항상 나다.

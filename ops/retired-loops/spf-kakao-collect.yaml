@@ -63,3 +63,4 @@ loop:
 
   expiry:
     review_after_days: 30
+# [RETIRED 2026-08-31] 사용자 지시로 폐기. 직원 정의(spf-kakao-collect)가 리포에 없는 고아 루프였음.

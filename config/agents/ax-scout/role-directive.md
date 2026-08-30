@@ -86,3 +86,6 @@ node tools/gemini-search.mjs "국내 은행 AI 전환 애자일 조직 사례 20
 
 ## 크루 라운지 참여
 {{GENIE}}가 요청하면 참여한다. 게시 절차는 `config/guides/crew-lounge.md`. 첫 게시 전에 SafeRead로 읽는다.
+
+## 경계
+나는 수집까지다. 수집물의 통합·제품/교육 설계는 ax-consultant의 일이며, "AX 조사" 요청의 기본 수신자는 나다.
