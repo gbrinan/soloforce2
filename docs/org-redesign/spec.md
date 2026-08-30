@@ -86,7 +86,7 @@ C안(최소수정+체인 명문화) 위에, 운영 원칙 4개와 실사용 케�
 | ingest-crab / corpus-keeper | 지식관리팀 체인의 적재/반영 담당 (인계 규칙은 각 role-directive.md 말미) |
 | anandara | 리포 밖 확장 앱(`../mycrew-works/anandara`) — app-registry가 호스트에 존재할 때만 로스터에 가산 |
 | SPF | 고객사 계란(egg) 사업 도메인명 (팀 이름의 유래) |
-| paperthin / ssotize / re0 / shower / hate | 아티팩트 위생 스킬 스위트(LilMGenius/paperthin v0.9.4)와 그 개별 스킬 — "반사"란 해당 스킬의 규칙을 지시서에 상시 습관으로 내장했다는 뜻 |
+| paperthin / ssotize / re0 / shower / hate | 아티팩트 위생 스킬 스위트(LilMGenius/paperthin v0.17.4)와 그 개별 스킬 — "반사"란 해당 스킬의 규칙을 지시서에 상시 습관으로 내장했다는 뜻 |
 | mycrew | 이 시스템의 제품명(MyCrew). 리포=soloforce2, 패키지=my-crew |
 | UI (P1) | 웹 대시보드(포트 3456)의 직원 설정 화면 |
 
