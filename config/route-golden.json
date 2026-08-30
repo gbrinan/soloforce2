@@ -1,0 +1,6 @@
+{
+  "_comment": "핵심 라우트·정적 자산 골든 목록. 리팩토링으로 마운트가 유실되면 route-golden-test가 잡는다. 새 핵심 표면 추가 시 여기에 등록.",
+  "routes": ["/health", "/api/staff", "/api/voice", "/api/jobs", "/api/approval"],
+  "staticAssets": ["/vad/", "/assets/"],
+  "sourceMustMention": { "/api/voice": "src/server", "/vad/": "src/server" }
+}

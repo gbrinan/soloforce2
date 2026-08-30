@@ -69,14 +69,22 @@ check(
 
 // --- 자동 등재된 직원에게 바닥이 있는가 ---
 for (const lvl of ["normal", undefined]) {
-  const args = buildPermissionArgs(scanRegisteredAgent(lvl));
-  const mode = modeOf(args);
-  const allowed = allowedOf(args);
-  const bounded = allowed.length > 0 || mode !== "bypassPermissions";
+  // 바닥은 둘 중 하나로 성립한다: (1) toolset-empty로 던져서 기동 자체를 차단, (2) 기동하되 bypass가 아님.
+  let bounded = false; let detail = "";
+  try {
+    const args = buildPermissionArgs(scanRegisteredAgent(lvl));
+    const mode = modeOf(args);
+    const allowed = allowedOf(args);
+    bounded = allowed.length > 0 || mode !== "bypassPermissions";
+    detail = `allowlist ${allowed.length}개 + mode=${mode}`;
+  } catch (e) {
+    bounded = /toolset-empty/.test(String(e));
+    detail = `기동 차단: ${String(e).slice(0, 60)}`;
+  }
   check(
     `씨앗만으로 등재된 직원에 바닥이 있다 (permLevel=${String(lvl)})`,
     bounded,
-    `allowlist ${allowed.length}개 + mode=${mode} → 전체 허용 & 확인 생략`,
+    detail,
   );
 }
 

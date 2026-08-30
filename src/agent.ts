@@ -175,9 +175,11 @@ const resolveSafefsCommand = () => resolveMcpCommand("safefs-server");
  * 미지정/알 수 없는 값 → bypassPermissions (하위호환).
  */
 export function permissionModeFor(level: string | undefined): "bypassPermissions" | "acceptEdits" | "default" {
-  if (level === "standard") return "acceptEdits";
-  if (level === "restricted") return "default";
-  return "bypassPermissions";
+  // fail-closed: 명시 개방(admin·workspace)만 bypass. 그 외(normal 포함)은 확인을 거친다.
+  // 경계(allowedTools·readPaths/writePaths)가 정의된 직원은 allowlist로 무프롬프트 동작 유지.
+  if (level === "admin" || level === "workspace") return "bypassPermissions";
+  if (level === "standard" || level === "normal") return "acceptEdits";
+  return "default";
 }
 
 // 도구 권한 args — runAgent(-p 워커)와 spawnPty(마이크루 PTY)가 공유. (Phase2 신규 PTY 파일 호환)
