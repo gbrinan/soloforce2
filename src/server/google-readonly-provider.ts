@@ -7,7 +7,7 @@ import {
   type GoogleDriveFile,
 } from "./google-readonly-schema.js";
 
-export const GOOGLE_DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly";
+export const GOOGLE_DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 export const GOOGLE_READONLY_SCOPES = ["openid", "email", GOOGLE_DRIVE_METADATA_SCOPE] as const;
 
 type ProviderOptions = {

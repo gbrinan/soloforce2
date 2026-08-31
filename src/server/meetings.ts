@@ -9,6 +9,7 @@ import { logCost } from "./jobs.js";
 import { addTodo } from "./todos.js";
 import { checkGroqQuota, recordGroqUsage, isGroqRateLimitError } from "./groq-usage.js";
 import { transcribeLocal } from "@mycrew/whisper-local";
+import { transcribeWithGemini } from "./voice-stt.js";
 
 export const RECORDINGS_DIR = join(HISTORY_DIR, "recordings");
 export const MEETINGS_DIR = join(HISTORY_DIR, "outputs", "meetings");
@@ -121,7 +122,7 @@ export interface MeetingMeta {
   shortSummary?: string;
   actionItems?: { task: string; owner?: string; dueDate?: string }[];
   // STT에 실제 사용된 엔진 — Groq 무료 티어 초과/에러 시 로컬 whisper.cpp로 폴백된 경우 "local".
-  sttEngine?: "groq" | "local";
+  sttEngine?: "groq" | "gemini" | "local";
   // 회의 언어 — STT 인식 언어 + AI 요약 출력 언어. 미지정 시 "ko"(회귀 방지 기본값).
   language?: MeetingLanguage;
 }
@@ -151,7 +152,7 @@ function normalizeMeetingMeta(raw: any, fallbackToken?: string): MeetingMeta | n
     completedAt: typeof raw.completedAt === "string" ? raw.completedAt : undefined,
     errorMessage: typeof raw.errorMessage === "string" ? raw.errorMessage : undefined,
     shortSummary: typeof raw.shortSummary === "string" ? raw.shortSummary : undefined,
-    sttEngine: raw.sttEngine === "groq" || raw.sttEngine === "local" ? raw.sttEngine : undefined,
+    sttEngine: raw.sttEngine === "groq" || raw.sttEngine === "gemini" || raw.sttEngine === "local" ? raw.sttEngine : undefined,
     language: raw.language === "ko" || raw.language === "en" || raw.language === "ja" ? raw.language : undefined,
     actionItems: Array.isArray(raw.actionItems)
       ? raw.actionItems
@@ -865,7 +866,7 @@ async function transcribeWithFallback(
   token: string,
   recordingPath: string,
   language: MeetingLanguage = "ko",
-): Promise<{ transcript: string; engine: "groq" | "local" }> {
+): Promise<{ transcript: string; engine: "groq" | "gemini" | "local" }> {
   const apiKey = process.env.GROQ_API_KEY;
   if (apiKey) {
     let estimatedAudioSec = 0;
@@ -893,6 +894,16 @@ async function transcribeWithFallback(
     console.log(`[meetings] ${token} GROQ_API_KEY 미설정 — 로컬 whisper.cpp 사용`);
   }
 
+  // 2단 폴백: Gemini STT (voice-stt 공용 클라이언트 재사용) — Groq 불가 시 로컬(느림) 전에 받는다.
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const gtext = (await transcribeWithGemini(recordingPath, language)).trim();
+      if (gtext) return { transcript: gtext, engine: "gemini" };
+      console.warn(`[meetings] ${token} Gemini 응답에 텍스트 없음 — 로컬 폴백`);
+    } catch (err) {
+      console.warn(`[meetings] ${token} Gemini 호출 실패 — 로컬 폴백:`, err);
+    }
+  }
   const local = await transcribeLocal(recordingPath, { tmpDir: join(tmpdir(), "meetings-whisper"), language });
   return { transcript: local.text.trim(), engine: "local" };
 }
