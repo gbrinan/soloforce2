@@ -95,7 +95,10 @@ export class GoogleReadonlyHttpProvider implements GoogleReadonlyProvider {
       return {
         accessToken: token.access_token,
         refreshToken: token.refresh_token ?? null,
-        grantedScopes: (token.scope ?? "").split(" ").filter((scope) => scope.length > 0),
+        grantedScopes: (token.scope ?? "").split(" ").filter((scope) => scope.length > 0)
+          // Google은 축약 스코프(email/profile)를 전체 URL로 반환한다 — 요구 목록의 축약형과 맞춰 정규화.
+          .map((scope) => scope === "https://www.googleapis.com/auth/userinfo.email" ? "email"
+            : scope === "https://www.googleapis.com/auth/userinfo.profile" ? "profile" : scope),
       };
     } catch (error) {
       throw new GoogleProviderError("token_exchange", { cause: error });
