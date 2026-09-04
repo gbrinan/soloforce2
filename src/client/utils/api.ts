@@ -1219,7 +1219,7 @@ export async function fetchContactsStats(): Promise<ContactStats | null> {
 
 // ── 커넥터 (Drive·Gmail·Calendar·Notion) ────────────────────────────────────
 
-export type ConnectorState = "connected" | "needs_reauth" | "not_connected";
+export type ConnectorState = "connected" | "needs_reauth" | "misconfigured" | "not_connected";
 
 export interface ConnectorStatus {
   provider: string;

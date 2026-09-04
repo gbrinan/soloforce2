@@ -50,8 +50,27 @@
 **회귀 확인**: 변경 전/후 `npm test` 출력 비교 — 차이는 랜덤 UUID 뿐.
 기존 23건 FAIL은 `history/agents.json`이 없는 새 클론에서 나는 사전 실패로, 변경 전에도 동일하다.
 
+### Phase 5: 실계정 E2E ✅ (일부 SKIP)
+
+**작업 내역**
+
+1. 공급자 엔드포인트 도달성 확인 — 구글 O, `api.notion.com`은 이 컨테이너 프록시 allowlist 밖
+2. **결함 4 발견·수정**: 실 구글의 `401 invalid_client`를 재동의로 오진하던 문제.
+   `misconfigured` 상태를 새로 두고 재시도·차단·복구문장·UI를 모두 갈랐다
+3. 라이브 계약 테스트 `scripts/connector-live-test.ts` (L1–L4) — `npm test`와 분리
+   (네트워크·실 자격증명 의존이라 오프라인 CI를 깨면 안 된다)
+4. 오프라인 회귀 T7 추가 — 설정 오류 분기를 자격증명 없이도 지킨다
+5. 서버 실기동(`PORT=3467`) → `/api/connectors`·`/api/service-policies`·브로커 라이브 확인
+6. MCP 서버를 실기동 호스트에 붙여 도구 호출 → 실 구글까지 왕복
+
+**검증 결과**: L1·L2 PASS, L3·L4 SKIP(자격증명 없음). 앱 사슬 전 구간 동작 확인.
+상세와 남은 절차: `e2e.md`.
+
+**부수 발견**: 테스트에서 `process.env.X = undefined`가 문자열 `"undefined"`를 넣어
+뒤 단계가 그 값을 진짜 client로 알고 도는 함정. `restoreEnv()`로 `delete` 처리.
+
 ## 남은 것 (다음 사이클 후보)
 
-- 실계정 E2E: 구글 동의 화면을 실제로 통과해 Drive 검색 1건까지 확인
+- 실계정 E2E 잔여분 L3·L4 — 실 OAuth client가 있는 환경에서 완주 (`e2e.md` 절차)
 - Slack 커넥터 (정책 표에 미연결로 남아 있다)
 - Notion 데이터베이스 질의 도구(`query_data_source`) — 현재는 검색·페이지 단위만

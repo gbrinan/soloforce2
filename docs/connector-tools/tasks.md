@@ -7,7 +7,7 @@ OAuth 만료를 복구 가능한 상태로 바꾼다.
 
 ## Current Phase
 
-✅ Phase 4: 문서·마감
+✅ Phase 5: 실계정 E2E (L3·L4는 실 자격증명 대기)
 
 ## Phases
 
@@ -41,6 +41,17 @@ OAuth 만료를 복구 가능한 상태로 바꾼다.
 - [x] `README.md` 환경변수 표 / `README-USER.md` 사용자 안내
 - [x] `CLAUDE.md` 커넥터 규약 (정본 위치·시스템 서버 근거·비밀 격리)
 - [x] `npm test`에 계약 테스트 편입
+
+### Phase 5: 실계정 E2E ✅
+
+- [x] 공급자 엔드포인트 도달성 확인
+- [x] **결함 4 수정** — 설정 오류(`misconfigured`)와 재동의(`needs_reauth`) 분리
+- [x] 라이브 테스트 L1·L2 통과 (`npm run test:connectors:live`)
+- [x] 오프라인 회귀 T7 추가
+- [x] 서버 실기동 + MCP 도구 전 구간 왕복 확인
+- [ ] L3 폐기 토큰 → `needs_reauth` (실 `GOOGLE_OAUTH_CLIENT_ID/SECRET` 필요)
+- [ ] L4 실계정 Drive·Gmail 왕복 (실 `GOOGLE_OAUTH_REFRESH_TOKEN` 필요)
+- [ ] Notion 실호출 (`api.notion.com`이 프록시 allowlist 밖 — 로컬에서 확인)
 
 ## Out of Scope
 

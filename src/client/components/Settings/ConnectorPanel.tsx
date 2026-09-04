@@ -87,7 +87,7 @@ export function ConnectorPanel() {
               <Button
                 size="xs"
                 variant={connector.state === "connected" ? "light" : "filled"}
-                disabled={!connector.connectUrl}
+                disabled={!connector.connectUrl || connector.state === "misconfigured"}
                 loading={busy === connector.provider}
                 onClick={() => connect(connector.provider)}
               >
@@ -104,6 +104,17 @@ export function ConnectorPanel() {
               </Text>
             </Alert>
           )}
+
+          {/* 설정 오류에 재연결을 권하지 않는다 — 원인이 .env라서 눌러도 안 고쳐진다. */}
+          {connector.state === "misconfigured" && (
+            <Alert mt="xs" p="xs" variant="light" color="red" icon={<IconAlertTriangle size={14} />}>
+              <Text size="xs">
+                OAuth 클라이언트 설정이 잘못됐습니다 — <b>재연결해도 고쳐지지 않습니다.</b>{" "}
+                <Code>.env</Code>의 클라이언트 ID/시크릿을 확인하고 서버를 재시작하세요.
+                {connector.lastError ? ` (${connector.lastError})` : ""}
+              </Text>
+            </Alert>
+          )}
         </Card>
       ))}
     </Stack>
@@ -113,5 +124,6 @@ export function ConnectorPanel() {
 function StateBadge({ state }: { state: ConnectorStatus["state"] }) {
   if (state === "connected") return <Badge size="xs" color="green" variant="light">연결됨</Badge>;
   if (state === "needs_reauth") return <Badge size="xs" color="orange" variant="light">재연결 필요</Badge>;
+  if (state === "misconfigured") return <Badge size="xs" color="red" variant="light">설정 오류</Badge>;
   return <Badge size="xs" color="gray" variant="light">미연결</Badge>;
 }

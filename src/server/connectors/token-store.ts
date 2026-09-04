@@ -18,7 +18,7 @@ import { ConnectorVault, resolveVaultKey, type ConnectorSecret } from "./vault.j
 /** 갱신을 미리 당기는 여유 — 만료 직전 토큰으로 호출해 401을 맞지 않게 한다. */
 const REFRESH_SKEW_MS = 120_000;
 
-export const ConnectionStateSchema = z.enum(["connected", "needs_reauth"]);
+export const ConnectionStateSchema = z.enum(["connected", "needs_reauth", "misconfigured"]);
 export type ConnectionState = z.infer<typeof ConnectionStateSchema>;
 
 export const ConnectionRecordSchema = z.object({
@@ -47,6 +47,7 @@ export type ConnectorAuthReason =
   | "not_configured"   // OAuth client도 env 토큰도 없다
   | "not_connected"    // 설정은 됐지만 아직 연결 안 함
   | "needs_reauth"     // refresh token이 죽었다 — 사람이 다시 동의해야 한다
+  | "misconfigured"    // client id/secret이 틀렸다 — 재동의로는 절대 안 고쳐진다
   | "refresh_failed";  // 일시적 실패 — 재시도하면 될 수도 있다
 
 export class ConnectorAuthError extends Error {
@@ -67,6 +68,10 @@ export class ConnectorAuthError extends Error {
       case "not_connected":
       case "needs_reauth":
         return `${this.provider} 재연결이 필요합니다 — 설정 → 연결에서 다시 연결하거나 POST /api/connectors/${this.provider}/oauth/start 를 여세요. (사유: ${this.detail})`;
+      case "misconfigured":
+        // ★ 재연결을 권하면 안 된다. 실제 구글이 잘못된 client에 401 invalid_client를 주는데
+        //   이걸 재동의로 안내하면 사용자가 영원히 재연결만 반복한다 (2026-09-04 라이브 검증).
+        return `${this.provider} OAuth 클라이언트 설정이 잘못됐습니다 — 재연결해도 고쳐지지 않습니다. .env의 클라이언트 ID/시크릿을 확인하고 서버를 재시작하세요. (사유: ${this.detail})`;
       case "refresh_failed":
         return `${this.provider} 토큰 갱신이 일시적으로 실패했습니다 — 잠시 후 다시 시도하세요. (${this.detail})`;
     }
@@ -232,16 +237,18 @@ export class ConnectorTokenStore {
     if (record.state === "needs_reauth") {
       throw new ConnectorAuthError(providerId, "needs_reauth", record.lastError ?? "이전 갱신이 거부됐습니다");
     }
+    // misconfigured는 막지 않는다 — .env를 고치고 재시작했으면 이번엔 성공해야 한다.
+    // (needs_reauth와 달리 사람의 재동의가 아니라 설정 수정으로 낫는 병이다)
 
     let secret: ConnectorSecret | null;
     try {
       secret = this.#vault.read(providerId);
     } catch {
-      this.#markNeedsReauth(record, "저장된 토큰을 복호화할 수 없습니다 (암호화 키 교체?)");
+      this.#markState(record, "needs_reauth", "저장된 토큰을 복호화할 수 없습니다 (암호화 키 교체?)");
       throw new ConnectorAuthError(providerId, "needs_reauth", "저장된 토큰을 복호화할 수 없습니다");
     }
     if (!secret) {
-      this.#markNeedsReauth(record, "저장된 토큰이 사라졌습니다");
+      this.#markState(record, "needs_reauth", "저장된 토큰이 사라졌습니다");
       throw new ConnectorAuthError(providerId, "needs_reauth", "저장된 토큰이 사라졌습니다");
     }
 
@@ -251,7 +258,7 @@ export class ConnectorTokenStore {
 
     if (!secret.refreshToken) {
       // 노션 내부 통합 토큰처럼 갱신 수단이 없는데 액세스 토큰도 죽었다 = 통합 폐기.
-      this.#markNeedsReauth(record, "갱신 토큰이 없고 액세스 토큰이 만료됐습니다");
+      this.#markState(record, "needs_reauth", "갱신 토큰이 없고 액세스 토큰이 만료됐습니다");
       throw new ConnectorAuthError(providerId, "needs_reauth", "갱신 토큰이 없습니다");
     }
 
@@ -281,8 +288,13 @@ export class ConnectorTokenStore {
         return grant.accessToken;
       } catch (error) {
         lastDetail = error instanceof Error ? error.message : String(error);
+        if (error instanceof ProviderMisconfiguredError) {
+          // 설정 오류 — 재시도도, 재동의도 소용없다. 사람이 .env를 고쳐야 한다.
+          this.#markState(record, "misconfigured", lastDetail);
+          throw new ConnectorAuthError(provider.id, "misconfigured", lastDetail);
+        }
         if (error instanceof RefreshRejectedError) {
-          this.#markNeedsReauth(record, lastDetail);
+          this.#markState(record, "needs_reauth", lastDetail);
           throw new ConnectorAuthError(provider.id, "needs_reauth", lastDetail);
         }
       }
@@ -291,10 +303,10 @@ export class ConnectorTokenStore {
     throw new ConnectorAuthError(provider.id, "refresh_failed", lastDetail);
   }
 
-  #markNeedsReauth(record: ConnectionRecord, detail: string): void {
+  #markState(record: ConnectionRecord, state: ConnectionState, detail: string): void {
     this.#putRecord(ConnectionRecordSchema.parse({
       ...record,
-      state: "needs_reauth",
+      state,
       lastError: detail.slice(0, 400),
     } satisfies ConnectionRecord));
   }
@@ -339,12 +351,40 @@ export class RefreshRejectedError extends Error {
   readonly name = "RefreshRejectedError";
 }
 
+/** OAuth 클라이언트 설정이 틀렸다 — 재동의로는 절대 안 고쳐진다. .env를 고쳐야 한다. */
+export class ProviderMisconfiguredError extends Error {
+  readonly name = "ProviderMisconfiguredError";
+}
+
+/**
+ * 토큰 엔드포인트의 4xx를 '사람이 할 수 있는 일' 기준으로 가른다 (RFC 6749 §5.2).
+ *
+ * ★ 라이브 검증(2026-09-04): 실제 oauth2.googleapis.com은 잘못된 client id/secret에
+ * `HTTP 401 {"error":"invalid_client"}` 를 준다. 이전 코드는 400·401을 전부 재동의로
+ * 안내해, 원인이 .env인데 사용자가 재연결만 무한 반복하게 만들었다.
+ */
+function classifyOAuthError(status: number, body: string): Error {
+  let code = "";
+  try {
+    code = String((JSON.parse(body) as { error?: unknown }).error ?? "");
+  } catch { /* 비-JSON 응답 — 아래 기본 분기로 */ }
+  const detail = `토큰 엔드포인트 거부 (HTTP ${status}${code ? `, ${code}` : ""}): ${body.slice(0, 200)}`;
+
+  // 설정을 고쳐야 낫는 것들 — 클라이언트 자격증명·grant 설정 문제.
+  if (code === "invalid_client" || code === "unauthorized_client"
+      || code === "unsupported_grant_type" || code === "invalid_request") {
+    return new ProviderMisconfiguredError(detail);
+  }
+  // invalid_grant(토큰 폐기·만료)·invalid_scope, 그리고 분류 불가한 4xx는 재동의로 보낸다.
+  return new RefreshRejectedError(detail);
+}
+
 async function refreshViaHttp(provider: ConnectorProviderDef, refreshToken: string): Promise<TokenGrant> {
   const clientId = process.env[provider.clientIdEnv] ?? "";
   const clientSecret = process.env[provider.clientSecretEnv] ?? "";
   if (!clientId || !clientSecret) {
-    // env refresh token만 있고 client가 없으면 갱신 자체가 불가능하다 — 재동의 경로로 보낸다.
-    throw new RefreshRejectedError(`${provider.clientIdEnv}/${provider.clientSecretEnv} 가 없어 갱신할 수 없습니다`);
+    // env refresh token만 있고 client가 없다 — 설정 오류다. 재동의로는 안 고쳐진다.
+    throw new ProviderMisconfiguredError(`${provider.clientIdEnv}/${provider.clientSecretEnv} 가 없어 갱신할 수 없습니다`);
   }
   const response = await fetch(provider.tokenEndpoint, {
     method: "POST",
@@ -359,9 +399,8 @@ async function refreshViaHttp(provider: ConnectorProviderDef, refreshToken: stri
   });
   const text = await response.text();
   if (!response.ok) {
-    // 400/401 + invalid_grant = 사용자가 접근을 취소했거나 토큰이 폐기됐다.
     if (response.status === 400 || response.status === 401) {
-      throw new RefreshRejectedError(`토큰 엔드포인트 거부 (HTTP ${response.status}): ${text.slice(0, 200)}`);
+      throw classifyOAuthError(response.status, text);
     }
     throw new Error(`토큰 엔드포인트 오류 (HTTP ${response.status}): ${text.slice(0, 200)}`);
   }

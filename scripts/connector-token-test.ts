@@ -16,6 +16,7 @@ import {
   ConnectorTokenStore,
   ConnectorAuthError,
   RefreshRejectedError,
+  ProviderMisconfiguredError,
   type TokenGrant,
 } from "../src/server/connectors/token-store.js";
 import { getProviderDef } from "../src/server/connectors/catalog.js";
@@ -225,6 +226,52 @@ async function t6_policyBecomesSpawnGates(): Promise<void> {
   console.log("  T6 정책 → spawn 게이트 번역 ✓");
 }
 
+/**
+ * T7 — 설정 오류는 재동의와 다른 병이다.
+ * 실 구글이 잘못된 client에 401 invalid_client를 준다는 사실은 라이브 테스트(L1)가 잡는다.
+ * 여기서는 그 분류가 상태·복구문장·재시도 정책으로 어떻게 번역되는지를 오프라인에서 고정한다.
+ */
+async function t7_misconfiguredIsNotReauth(): Promise<void> {
+  let calls = 0;
+  const s = freshStore({
+    exchange: async () => {
+      calls += 1;
+      throw new ProviderMisconfiguredError('토큰 엔드포인트 거부 (HTTP 401, invalid_client)');
+    },
+  });
+  s.saveGrant({
+    providerId: "google",
+    grant: { accessToken: "access-1", refreshToken: "refresh-1", expiresInSec: 1, grantedScopes: [] },
+    accountLabel: null,
+  });
+
+  const error = await s.getAccessToken("google").then(() => null, (e: unknown) => e);
+  assert.ok(error instanceof ConnectorAuthError);
+  assert.equal(error.reason, "misconfigured");
+  assert.equal(calls, 1, "설정 오류는 재시도하지 않는다");
+  assert.doesNotMatch(error.remedy, /재연결이 필요합니다/, "재동의를 권하면 무한 루프가 된다");
+  assert.match(error.remedy, /\.env/);
+  assert.equal(s.getRecord("google")?.state, "misconfigured");
+
+  // ★ needs_reauth와 결정적으로 다른 점: 설정을 고쳤을 수 있으므로 다음 호출을 막지 않는다.
+  const s2 = freshStore({
+    exchange: async () => {
+      calls += 1;
+      return { accessToken: "access-fixed", refreshToken: null, expiresInSec: 3600, grantedScopes: [] };
+    },
+  });
+  s2.saveGrant({
+    providerId: "google",
+    grant: { accessToken: "a", refreshToken: "r", expiresInSec: 1, grantedScopes: [] },
+    accountLabel: null,
+  });
+  // misconfigured 상태를 만든 뒤 갱신이 성공하면 connected로 돌아와야 한다.
+  assert.equal(await s2.getAccessToken("google"), "access-fixed");
+  assert.equal(s2.getRecord("google")?.state, "connected");
+  cleanup();
+  console.log("  T7 설정 오류 ≠ 재동의 (재시도 없음·차단 없음) ✓");
+}
+
 async function main(): Promise<void> {
   console.log("[connector-token-test] 시작");
   try {
@@ -234,6 +281,7 @@ async function main(): Promise<void> {
     await t4_transientFailureRetriesAndKeepsConnected();
     await t5_refreshTokenSurvivesRotationlessResponse();
     await t6_policyBecomesSpawnGates();
+    await t7_misconfiguredIsNotReauth();
   } finally {
     cleanup();
   }

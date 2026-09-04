@@ -36,6 +36,12 @@
   카탈로그·정책·게이트 셋이 함께 움직여야 한다.
 - refresh token은 호스트 프로세스 밖으로 내보내지 않는다. MCP 자식은 브로커
   (`/api/connectors/:provider/access-token`)로 수명 짧은 액세스 토큰만 받는다.
+- 토큰 실패는 **사람이 할 수 있는 일** 기준으로 가른다: `needs_reauth`(재동의로 나음)와
+  `misconfigured`(.env 수정으로 나음)를 섞지 마라. 실 구글은 잘못된 client에
+  `401 invalid_client`를 주는데, 이걸 재동의로 안내하면 사용자가 무한 재연결에 빠진다
+  (2026-09-04 라이브 E2E에서 실제로 잡은 결함). 분류표는 `docs/connector-tools/e2e.md`.
+- 공급자 오류 처리를 고칠 때는 모킹만 믿지 말고 `npm run test:connectors:live`로
+  실 엔드포인트에 물어봐라 — 결함 4는 모킹으로는 잡히지 않았다.
 
 ## 이력 규약
 

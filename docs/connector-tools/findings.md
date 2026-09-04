@@ -39,6 +39,15 @@ google-drive·gmail·google-calendar·notion·slack을 전부 `connected: true`�
 - `src/mcp/appdata-server.ts` — 항상 실리는 시스템 MCP 서버의 선례 (지니 전용)
 - `@notionhq/notion-mcp-server`가 이미 dependency에 있다 (미배선)
 
+### 결함 4 — 설정 오류를 재동의로 오진 (라이브 E2E에서 발견, 2026-09-04)
+
+실 `oauth2.googleapis.com`은 잘못된 client id/secret에 `HTTP 401 {"error":"invalid_client"}`
+를 준다. 초기 구현은 토큰 엔드포인트의 400·401을 전부 `needs_reauth`로 처리해, 원인이
+`.env`인데 사용자에게 재연결을 무한 반복시켰다. **모킹만으로는 못 잡는 결함이다** —
+실제 공급자가 어떤 상태 코드와 코드명을 주는지는 쳐 봐야 알 수 있었다.
+→ RFC 6749 §5.2 오류 코드로 `needs_reauth`(재동의로 나음)와 `misconfigured`(.env 수정으로
+나음)를 가른다. 상세: `e2e.md`.
+
 ## 결정
 
 ### D1 — 기존 `google-readonly-*`를 고치지 않고 옆에 짓는다
