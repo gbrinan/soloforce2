@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { createGoogleReadonlyServerRoutes } from "./google-readonly-server.js";
+import { createConnectorRoutes } from "./connectors/routes.js";
 import { prepareUpdate, applyPreparedUpdate } from "./update-apply.js";
 import { checkUpdatesNow, getUpdateStatus } from "./update-check.js";
 import { registerRoutes } from "./routes.js";
@@ -38,5 +39,7 @@ export function createServerApp(): Hono {
   });
   app.route("/api/external", storePartnerInstallRoutes);
   app.route("/api/connections/google-drive", createGoogleReadonlyServerRoutes());
+  // Drive·Gmail·Calendar·Notion 커넥터 — 연결 상태/OAuth/토큰 브로커 (docs/connector-tools)
+  app.route("/api/connectors", createConnectorRoutes());
   return app;
 }

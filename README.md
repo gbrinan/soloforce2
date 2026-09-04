@@ -62,6 +62,8 @@ cp .env.example .env
 | `TUNNEL_REMOTE_PORT` | SSH 터널 리모트 포트 | — |
 | `TUNNEL_URL` | SSH 터널 외부 URL | — |
 | `APPROVAL_RESOLVE_TOKEN` | 승인 API 보안 토큰 (외부 접속 시 필수) | — |
+| `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | Drive·Gmail·Calendar 커넥터 OAuth 클라이언트 | — |
+| `NOTION_API_TOKEN` | Notion 내부 통합 토큰 (또는 `NOTION_OAUTH_CLIENT_ID`/`_SECRET`) | — |
 | `PORT` | 서버 포트 | `3456` |
 
 ## 실행

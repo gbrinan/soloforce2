@@ -3,6 +3,10 @@ import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { emitGlobalEvent } from "./jobs.js";
+import { CONNECTOR_MCP_SERVER, SERVICE_PROVIDER, SERVICE_TOOLS } from "./connectors/catalog.js";
+import { ConnectorTokenStore } from "./connectors/token-store.js";
+import { computeConnectorGates, toolPrefix, type ConnectorGates } from "./connectors/gates.js";
+import { HISTORY_DIR } from "../config.js";
 
 export type PolicyMode = "auto" | "approval";
 
@@ -34,36 +38,35 @@ export type ApprovalDecision = "approve" | "reject";
 
 const POLICIES_FILE = resolve(".", "config", "service-policies.json");
 
+// 도구 이름·서비스 매핑의 정본은 connectors/catalog.ts다 — 여기서는 참조만 한다.
+// (2026-09-04 이전 이 배열은 mcpServerId를 "claude.ai Google_Drive"로 들고 있었다.
+//  그런 MCP 서버는 존재한 적이 없어 getPolicyDisallowedTools의 차단 목록이 늘 공집합과
+//  같았고, connected:true는 뒤에 아무 연결도 없는 표시뿐이었다. docs/connector-tools/findings.md 결함 1·2)
+function connectorPolicy(
+  id: keyof typeof SERVICE_TOOLS,
+  label: string,
+  category: string,
+  writePolicy: PolicyMode,
+): ServicePolicy {
+  return {
+    id, label, mcpServerId: CONNECTOR_MCP_SERVER, category,
+    connected: false,   // 실제 연결 상태로 매 조회마다 덮어쓴다 (overlayConnectionState)
+    enabled: true, readPolicy: "auto", writePolicy,
+    readTools: [...SERVICE_TOOLS[id].read],
+    writeTools: [...SERVICE_TOOLS[id].write],
+  };
+}
+
 const DEFAULT_POLICIES: ServicePolicy[] = [
+  connectorPolicy("google-drive", "Google Drive", "google", "approval"),
+  connectorPolicy("google-calendar", "Google Calendar", "google", "approval"),
+  connectorPolicy("gmail", "Gmail", "google", "approval"),
+  connectorPolicy("notion", "Notion", "productivity", "approval"),
   {
-    id: "google-drive", label: "Google Drive", mcpServerId: "claude.ai Google_Drive",
-    category: "google", connected: true, enabled: true, readPolicy: "auto", writePolicy: "approval",
-    readTools: ["download_file_content", "read_file_content", "get_file_metadata", "search_files", "list_recent_files", "get_file_permissions"],
-    writeTools: ["create_file", "copy_file"],
-  },
-  {
-    id: "google-calendar", label: "Google Calendar", mcpServerId: "claude.ai Google_Calendar",
-    category: "google", connected: true, enabled: true, readPolicy: "auto", writePolicy: "approval",
-    readTools: ["list_calendars", "list_events", "get_event", "suggest_time"],
-    writeTools: ["create_event", "update_event", "delete_event", "respond_to_event"],
-  },
-  {
-    id: "gmail", label: "Gmail", mcpServerId: "claude.ai Gmail",
-    category: "google", connected: true, enabled: true, readPolicy: "auto", writePolicy: "approval",
-    readTools: ["search_threads", "get_thread", "list_drafts", "list_labels"],
-    writeTools: ["create_draft", "label_message", "label_thread"],
-  },
-  {
-    id: "slack", label: "Slack", mcpServerId: "claude.ai Slack",
-    category: "communication", connected: true, enabled: true, readPolicy: "auto", writePolicy: "approval",
-    readTools: ["slack_read_channel", "slack_read_thread", "slack_search_channels", "slack_search_public", "slack_read_user_profile"],
-    writeTools: ["slack_send_message", "slack_send_message_draft", "slack_schedule_message", "slack_create_canvas"],
-  },
-  {
-    id: "notion", label: "Notion", mcpServerId: "claude.ai Notion",
-    category: "productivity", connected: true, enabled: true, readPolicy: "auto", writePolicy: "approval",
-    readTools: ["notion-search", "notion-fetch", "notion-get-comments", "notion-get-teams", "notion-get-users"],
-    writeTools: ["notion-create-pages", "notion-update-page", "notion-create-comment", "notion-create-database"],
+    // 커넥터 미구현 — 표에는 남기되 연결됐다고 말하지 않는다.
+    id: "slack", label: "Slack", mcpServerId: "",
+    category: "communication", connected: false, enabled: false, readPolicy: "approval", writePolicy: "approval",
+    readTools: [], writeTools: [],
   },
   {
     id: "asana", label: "Asana", mcpServerId: "",
@@ -75,13 +78,60 @@ const DEFAULT_POLICIES: ServicePolicy[] = [
 // ── 정책 파일 읽기/쓰기 ──────────────────────────────────────────────────────
 
 export function loadServicePolicies(): ServicePolicy[] {
+  let stored: ServicePolicy[] = DEFAULT_POLICIES;
   try {
-    if (!existsSync(POLICIES_FILE)) return DEFAULT_POLICIES;
-    const raw = JSON.parse(readFileSync(POLICIES_FILE, "utf-8"));
-    return Array.isArray(raw.services) ? raw.services as ServicePolicy[] : DEFAULT_POLICIES;
+    if (existsSync(POLICIES_FILE)) {
+      const raw = JSON.parse(readFileSync(POLICIES_FILE, "utf-8"));
+      if (Array.isArray(raw.services)) stored = raw.services as ServicePolicy[];
+    }
+  } catch { /* 손상 파일 → 기본값 */ }
+  return overlayConnectionState(stored.map(normalizeToCatalog));
+}
+
+/**
+ * 디스크에 굳은 항목을 카탈로그로 재동기화한다.
+ * 사람이 정한 것(enabled/readPolicy/writePolicy)은 지키고, 기계가 아는 것
+ * (mcpServerId·도구 이름)은 카탈로그가 이긴다 — 이미 배포된 설치본의
+ * "claude.ai Google_Drive" 같은 죽은 참조가 그대로 살아 있지 않게.
+ */
+function normalizeToCatalog(policy: ServicePolicy): ServicePolicy {
+  const tools = SERVICE_TOOLS[policy.id as keyof typeof SERVICE_TOOLS];
+  if (!tools) return policy;
+  return {
+    ...policy,
+    mcpServerId: CONNECTOR_MCP_SERVER,
+    readTools: [...tools.read],
+    writeTools: [...tools.write],
+  };
+}
+
+/**
+ * connected 를 실제 커넥터 연결 상태로 덮는다.
+ * 이 값은 파일에 저장되지 않는다 — 저장하면 다시 "표시만 되는 거짓말"이 된다.
+ */
+function overlayConnectionState(policies: ServicePolicy[]): ServicePolicy[] {
+  let connectedProviders: Set<string>;
+  try {
+    connectedProviders = new Set(
+      connectorStatus().filter((s) => s.state === "connected").map((s) => s.provider),
+    );
   } catch {
-    return DEFAULT_POLICIES;
+    connectedProviders = new Set();   // 커넥터 계층이 죽어도 정책 조회는 살아야 한다
   }
+  return policies.map((policy) => {
+    const provider = SERVICE_PROVIDER[policy.id];
+    return provider ? { ...policy, connected: connectedProviders.has(provider) } : policy;
+  });
+}
+
+/** 커넥터 상태 조회 — 순환 import를 피하려 지연 로드한다. */
+let statusFn: (() => Array<{ provider: string; state: string }>) | null = null;
+function connectorStatus(): Array<{ provider: string; state: string }> {
+  if (!statusFn) {
+    const store = new ConnectorTokenStore({ historyDir: HISTORY_DIR });
+    statusFn = () => store.status();
+  }
+  return statusFn();
 }
 
 export function getServicePolicy(id: string): ServicePolicy | undefined {
@@ -193,7 +243,7 @@ export function getPolicyDisallowedTools(): string[] {
   const result: string[] = [];
   for (const p of policies) {
     if (!p.mcpServerId) continue;
-    const prefix = "mcp__" + p.mcpServerId.replace(/\./g, "_").replace(/\s+/g, "_") + "__";
+    const prefix = toolPrefix(p.mcpServerId);
     if (!p.enabled) {
       result.push(...p.readTools.map((t) => prefix + t));
       result.push(...p.writeTools.map((t) => prefix + t));
@@ -224,4 +274,19 @@ function buildHumanReadableDesc(
   const builder = descriptions[toolName];
   if (builder) return builder(toolInput);
   return `${serviceLabel} — ${toolName} 실행`;
+}
+
+// ── spawn 게이트 (지니·워커 PTY용) ───────────────────────────────────────────
+
+/**
+ * PTY spawn이 물어보는 것: 어떤 커넥터 도구를 승인 없이 열고, 어떤 것을 승인 훅에 걸고,
+ * 어떤 서비스를 아예 노출하지 않을지.
+ *
+ * ★ 이 함수가 있어야 설정 화면의 정책이 인터랙티브 세션에 닿는다.
+ * getPolicyDisallowedTools는 jobs.ts의 워커 잡 경로(src/agent.ts)에만 실리므로,
+ * 지니 PTY(terminal-ws)와 워커 PTY(worker-pty)는 정책 밖에 있었다.
+ * 규칙 본체는 connectors/gates.ts의 순수 함수다 (계약 테스트가 그쪽을 겨눈다).
+ */
+export function getConnectorToolGates(): ConnectorGates {
+  return computeConnectorGates(loadServicePolicies());
 }

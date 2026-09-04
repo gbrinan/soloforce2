@@ -3,6 +3,7 @@ import { Stack, Title, Text, Divider, LoadingOverlay, Alert } from "@mantine/cor
 import { IconInfoCircle } from "@tabler/icons-react";
 import { listServicePolicies, patchServicePolicy, type ServicePolicy, type PolicyMode } from "../../utils/api";
 import { ServiceCardGrid } from "./ServiceCardGrid";
+import { ConnectorPanel } from "./ConnectorPanel";
 import { ServicePolicyMatrix } from "./ServicePolicyMatrix";
 import { useI18n } from "../../i18n/I18nProvider";
 
@@ -46,6 +47,13 @@ export function ServicePolicyPanel() {
           {t('settings.policyPanel.writeAlertPrefix')}<b>{t('settings.policy.approval')}</b>{t('settings.policyPanel.writeAlertSuffix')}
         </Text>
       </Alert>
+
+      <div>
+        <Title order={6} mb="xs" c="dimmed">계정 연결</Title>
+        <ConnectorPanel />
+      </div>
+
+      <Divider />
 
       <div>
         <Title order={6} mb="xs" c="dimmed">

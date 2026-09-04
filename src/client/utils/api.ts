@@ -1216,3 +1216,42 @@ export async function fetchContactsStats(): Promise<ContactStats | null> {
   if (!res.ok) return null;
   return res.json();
 }
+
+// ── 커넥터 (Drive·Gmail·Calendar·Notion) ────────────────────────────────────
+
+export type ConnectorState = "connected" | "needs_reauth" | "not_connected";
+
+export interface ConnectorStatus {
+  provider: string;
+  label: string;
+  /** OAuth client 또는 정적 토큰이 .env에 갖춰졌나. false면 연결 버튼을 눌러도 소용없다. */
+  configured: boolean;
+  state: ConnectorState;
+  accountLabel: string | null;
+  grantedScopes: string[];
+  /** needs_reauth 사유 — 그대로 보여준다. */
+  lastError: string | null;
+  connectUrl: string | null;
+}
+
+export async function listConnectors(): Promise<ConnectorStatus[]> {
+  const res = await fetch("/api/connectors");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.connectors ?? [];
+}
+
+/** OAuth 동의 화면 URL을 받아 온다 (창을 여는 건 호출자 몫). */
+export async function startConnectorOAuth(provider: string): Promise<{ ok: boolean; authorizationUrl?: string; error?: string }> {
+  const res = await fetch(`/api/connectors/${encodeURIComponent(provider)}/oauth/start`, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data.error ?? `http_${res.status}` };
+  return { ok: true, authorizationUrl: data.authorizationUrl };
+}
+
+export async function revokeConnector(provider: string): Promise<{ ok: boolean; connectors?: ConnectorStatus[] }> {
+  const res = await fetch(`/api/connectors/${encodeURIComponent(provider)}/revoke`, { method: "POST" });
+  if (!res.ok) return { ok: false };
+  const data = await res.json().catch(() => ({}));
+  return { ok: true, connectors: data.connectors };
+}
