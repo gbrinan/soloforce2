@@ -19,6 +19,8 @@ import { randomUUID } from "node:crypto";
 import { AgentPty, claudeSessionExists, SUBMIT_RESPONSE_DIRECTIVE } from "./agent-pty.js";
 import { buildPermissionArgs } from "../agent.js";
 import { resolveAgentMcpServers } from "./mcp-registry.js";
+import { getConnectorToolGates } from "./service-policies.js";
+import { connectorTokenFile } from "./connectors/routes.js";
 import { CLAUDE_PATH, CLAUDE_BIN_DIR, PROJECT_SELF_DIR, MYCREW_HOME, PROJECTS_DIR, TSX_BIN, TSX_CLI_ARGS } from "../config.js";
 import { IS_WIN } from "./utils/platform.js";
 import { safeChildEnv } from "./utils/safeChildEnv.js";
@@ -55,6 +57,8 @@ async function buildWorkerSpawn(config: AgentConfig) {
   const base = `http://127.0.0.1:${port}`;
   // 할당된 MCP 서버를 레지스트리에서 해석 (safefs는 아래에 항상 직접 포함)
   const { servers: extraMcp, allowNames, approvalNames } = resolveAgentMcpServers(config.mcpServers);
+  // 서비스 정책 → 커넥터 도구 게이트 (지니 PTY와 동일 규칙)
+  const connectorGates = getConnectorToolGates();
 
   writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
@@ -96,6 +100,18 @@ async function buildWorkerSpawn(config: AgentConfig) {
           MCP_ASK_URL: `${base}/api/worker-questions`,
         },
       },
+      // 커넥터(Drive·Gmail·Calendar·Notion) — 연결됐고 정책이 켜 둔 서비스만 도구가 등록된다.
+      ...(connectorGates.services.length > 0 ? {
+        connectors: {
+          command: TSX_BIN,
+          args: [...TSX_CLI_ARGS, join(PROJECT_SELF_DIR, "src", "mcp", "connectors-server.ts")],
+          env: {
+            MCP_CONNECTOR_BASE_URL: base,
+            MCP_CONNECTOR_TOKEN_FILE: connectorTokenFile(),
+            MCP_CONNECTOR_SERVICES: connectorGates.services.join(","),
+          },
+        },
+      } : {}),
       ...extraMcp,   // 레지스트리에서 할당된 MCP 서버 (playwright 등)
     },
   }), "utf-8");
@@ -111,17 +127,24 @@ async function buildWorkerSpawn(config: AgentConfig) {
   // allow 모드 서버 → allowedTools에 통째 추가(승인 없이 사용).
   const hookCmd = `node "${join(PROJECT_SELF_DIR, "scripts", "mcp-approval-hook.mjs")}"`;
   const stopHookCmd = `node "${join(PROJECT_SELF_DIR, "scripts", "stop-response-hook.mjs")}"`;
-  const preToolUse = approvalNames.map((n) => ({
+  const preToolUse: Array<Record<string, unknown>> = approvalNames.map((n) => ({
     matcher: `mcp__${n}__.*`,
     hooks: [{ type: "command", command: hookCmd, timeout: 70 }],
   }));
+  // 정책이 approval인 커넥터 쓰기 도구만 승인 카드로 — 읽기는 아래 extraAllowedTools로 통과.
+  if (connectorGates.approvalTools.length > 0) {
+    preToolUse.push({
+      matcher: `mcp__connectors__(${connectorGates.approvalTools.join("|")})$`,
+      hooks: [{ type: "command", command: hookCmd, timeout: 70 }],
+    });
+  }
   // Stop 훅 안전망(마이크루와 동일) — 워커가 submit_response를 누락/미해소해도 턴 종료 시
   // last_assistant_message를 /api/agent-response로 전달해 busy 갇힘 방지 + 보고 회수. (Stop은 matcher 미지원)
   const hooks: Record<string, unknown> = {
     Stop: [{ hooks: [{ type: "command", command: stopHookCmd, timeout: 10 }] }],
   };
   if (preToolUse.length) hooks.PreToolUse = preToolUse;
-  const extraAllowedTools = allowNames.map((n) => `mcp__${n}`);
+  const extraAllowedTools = [...allowNames.map((n) => `mcp__${n}`), ...connectorGates.allowedTools];
   // 인터랙티브 — 내장 도구 차단 + submit_response 허용 (genie PTY와 동일 정책) + 승인 훅
   cliArgs.push(...buildPermissionArgs(config, { interactive: true, hooks, extraAllowedTools }));
 

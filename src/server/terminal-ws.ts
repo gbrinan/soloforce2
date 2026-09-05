@@ -24,6 +24,8 @@ import { getGenieAgent } from "../agents/genie.js";
 import { effortForConfig } from "./effort-policy.js";
 import { buildPermissionArgs } from "../agent.js";
 import { resolveAgentMcpServers } from "./mcp-registry.js";
+import { getConnectorToolGates } from "./service-policies.js";
+import { connectorTokenFile } from "./connectors/routes.js";
 import { listManifests } from "./app-registry.js";
 import { AgentPty, claudeSessionExists, SUBMIT_RESPONSE_DIRECTIVE, type SpawnSpec } from "./agent-pty.js";
 import { computeMemoryDir } from "../mcp/memory-dir.js";
@@ -86,6 +88,8 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
   const memDir = computeMemoryDir(PROJECT_SELF_DIR);
   // 마이크루에 할당된 MCP 서버를 레지스트리에서 해석 (safefs는 아래에 항상 직접 포함)
   const { servers: extraMcp, allowNames, approvalNames } = resolveAgentMcpServers(genieConfig.mcpServers);
+  // 서비스 정책 → 커넥터 도구 게이트. 설정 화면의 auto/approval이 여기서 spawn 인자가 된다.
+  const connectorGates = getConnectorToolGates();
   writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
       ...extraMcp,
@@ -127,6 +131,18 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
           MCP_GENIE_ACTION_BASE: `http://127.0.0.1:${port}`,
         },
       },
+      // 커넥터(Drive·Gmail·Calendar·Notion) — 연결됐고 정책이 켜 둔 서비스만 도구가 등록된다.
+      ...(connectorGates.services.length > 0 ? {
+        connectors: {
+          command: TSX_BIN,
+          args: [...TSX_CLI_ARGS, join(PROJECT_SELF_DIR, "src", "mcp", "connectors-server.ts")],
+          env: {
+            MCP_CONNECTOR_BASE_URL: `http://127.0.0.1:${port}`,
+            MCP_CONNECTOR_TOKEN_FILE: connectorTokenFile(),
+            MCP_CONNECTOR_SERVICES: connectorGates.services.join(","),
+          },
+        },
+      } : {}),
       // 지니 전용 앱 데이터 통합 질의(ledger/bookshelf/booking) — 읽기 전용 GET, 앱 프록시 경유.
       appdata: {
         command: TSX_BIN,
@@ -166,6 +182,13 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
   }));
   // 알바(Agent) 스폰 감지 → UI "알바 작업 중" 표시 (fire-and-forget)
   preToolUse.push({ matcher: "Agent", hooks: [{ type: "command", command: agentEventCmd, timeout: 5 }] });
+  // 정책이 approval인 커넥터 쓰기 도구만 승인 카드로 — 읽기는 아래 extraAllowedTools로 통과.
+  if (connectorGates.approvalTools.length > 0) {
+    preToolUse.push({
+      matcher: `mcp__connectors__(${connectorGates.approvalTools.join("|")})$`,
+      hooks: [{ type: "command", command: hookCmd, timeout: 70 }],
+    });
+  }
   const hooks = {
     PreToolUse: preToolUse,
     SubagentStop: [{ matcher: "*", hooks: [{ type: "command", command: agentEventCmd, timeout: 5 }] }],
@@ -174,7 +197,7 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
     Stop: [{ hooks: [{ type: "command", command: stopHookCmd, timeout: 10 }] }],
   };
   // appdata는 읽기 전용 GET만이라 승인 없이 허용 (playwright allow 모드와 동일 근거).
-  const extraAllowedTools = [...allowNames.map((n) => `mcp__${n}`), "mcp__appdata"];
+  const extraAllowedTools = [...allowNames.map((n) => `mcp__${n}`), "mcp__appdata", ...connectorGates.allowedTools];
   cliArgs.push(...buildPermissionArgs(genieConfig, { interactive: true, hooks, extraAllowedTools }));
   if (sessionId && claudeSessionExists(sessionId, process.cwd())) {
     cliArgs.push("--resume", sessionId);
