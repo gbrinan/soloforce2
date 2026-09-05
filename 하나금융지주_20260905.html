@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>하나금융지주 1페이지 브리핑</title>
+<style>
+  :root { --navy:#00857c; --ink:#1e2a32; --line:#dde3ec; --panel:#eef6f5; --up:#1a7f4b; --down:#c0392b; --gold:#a68a5b; --highlight:#fdf1de; --highlight-border:#e8c98a; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; color:var(--ink); background:#fff;
+         max-width:900px; margin:0 auto; padding:32px 28px; line-height:1.6; font-size:16px; }
+  header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-bottom:2px solid var(--navy); padding-bottom:12px; }
+  h1 { font-size:2rem; color:var(--navy); line-height:1.2; }
+  .sub { color:#667; font-size:.95rem; margin-top:4px; }
+  .tag { background:var(--navy); color:#fff; font-size:.8rem; font-weight:700; padding:4px 10px; border-radius:4px; white-space:nowrap; }
+  .meta { text-align:right; color:#667; font-size:.9rem; }
+  .kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin:18px 0; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi.focus { background:var(--highlight); border:1.5px solid var(--highlight-border); }
+  .kpi .l { color:#667; font-size:.82rem; }
+  .kpi.focus .l { color:#7a5b1e; font-weight:700; }
+  .kpi .v { color:var(--navy); font-weight:800; font-size:1.2rem; margin:2px 0; }
+  .kpi .d { color:#667; font-size:.82rem; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .chart { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:18px; }
+  .chart .t { font-weight:700; color:var(--navy); font-size:1rem; display:flex; justify-content:space-between; }
+  .chart .t span { color:#667; font-weight:400; font-size:.85rem; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+  h2 { font-size:1.1rem; color:var(--navy); border-left:4px solid var(--navy); padding-left:10px; margin:18px 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:.96rem; }
+  th, td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:left; }
+  th { color:#667; font-weight:600; background:var(--panel); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  ul { padding-left:16px; font-size:.96rem; }
+  li { margin-bottom:5px; }
+  .date { color:#889; font-size:.85rem; margin-right:6px; }
+  .src { color:#889; font-size:.82rem; }
+  .topics { background:#fdf7ea; border:1px solid #f0dfb5; border-radius:8px; padding:12px 16px; }
+  .topics h2 { border-left-color:var(--gold); color:#7a5b1e; margin-top:0; }
+  .topics ol { padding-left:18px; font-size:.96rem; }
+  footer { margin-top:22px; padding-top:10px; border-top:1px solid var(--line); color:#889; font-size:.82rem; }
+  @media print { body { padding:0; } .kpis { grid-template-columns:repeat(6,1fr); } }
+  @media (max-width:640px) { .kpis { grid-template-columns:repeat(2,1fr); } .grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>하나금융지주 <small style="font-size:.6em;color:#667">(Hana Financial Group Inc.)</small></h1>
+      <div class="sub">KOSPI 086790 · 금융지주(64992) · 대표 함영주 · 설립 2005.12.01 · 본사 서울특별시 중구 을지로 66</div>
+    </div>
+    <div class="meta">
+      <div class="tag">1-PAGE BRIEFING</div>
+      <div style="margin-top:6px">미팅 참고자료</div>
+      <div>작성일 2026-09-05 · 자료: OpenDART, 한국 주식 정보, 네이버 검색</div>
+    </div>
+  </header>
+
+  <section class="kpis">
+    <div class="kpi"><div class="l">현재가 (2026-09-04 종가)</div><div class="v">134,300원</div><div class="d down">-5,200원 (-3.73%)</div></div>
+    <div class="kpi"><div class="l">시가총액</div><div class="v">368,476억원</div><div class="d">KOSPI200 · 금융</div></div>
+    <div class="kpi focus"><div class="l">거래량 ★</div><div class="v">881,360주</div><div class="d">전일 대비 -63,673주 (-6.7%)</div></div>
+    <div class="kpi"><div class="l">PER / PBR</div><div class="v">9.52 / 0.82</div><div class="d">PBR 1배 미만 (저평가 구간)</div></div>
+    <div class="kpi focus"><div class="l">부채비율 ★</div><div class="v">1,372.66%</div><div class="d">전기말(1,377.99%) 대비 -5.3%p</div></div>
+    <div class="kpi focus"><div class="l">최대주주 지분율 ★</div><div class="v">8.66%</div><div class="d">국민연금공단</div></div>
+  </section>
+
+  <section class="chart">
+    <div class="t">일별 종가 추이 (2026-07-01 ~ 2026-09-04) <span>최고 142,500원(07-16) · 최저 113,600원(07-01)</span></div>
+    <div>
+      <table>
+        <tr><th>날짜</th><th>07-01</th><th>07-10</th><th>07-20</th><th>07-31</th><th>08-10</th><th>08-21</th><th>08-31</th><th>09-04</th></tr>
+        <tr><td>종가</td><td class="num">116,400</td><td class="num">128,500</td><td class="num">133,400</td><td class="num">125,400</td><td class="num">130,400</td><td class="num">128,800</td><td class="num">136,300</td><td class="num">134,300</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <div class="grid">
+    <div>
+      <h2>최근 실적 — 연결기준 (2026년 반기, 접수일 2026-08-14)</h2>
+      <table>
+        <tr><th>구분</th><th>2026년 반기</th><th>2025년 반기</th><th>증감률</th></tr>
+        <tr><td>순이자이익</td><td class="num">2조 302억</td><td class="num">2조 216억</td><td class="num up">+3.9%</td></tr>
+        <tr><td>순수수료이익</td><td class="num">8,935억</td><td class="num">6,877억</td><td class="num up">+29.9%</td></tr>
+        <tr><td>영업이익</td><td class="num">1조 5,944억</td><td class="num">1조 4,933억</td><td class="num up">+6.8%</td></tr>
+        <tr><td>당기순이익</td><td class="num">1조 2,061억</td><td class="num">1조 1,848억</td><td class="num up">+1.8%</td></tr>
+      </table>
+      <div class="src">(출처: OpenDART)</div>
+
+      <h2>재무상태 (2026-06-30, 연결)</h2>
+      <table>
+        <tr><th>구분</th><th>금액</th><th>구분</th><th>값</th></tr>
+        <tr><td>자산총계</td><td class="num">713조 4,628억</td><td>ROE</td><td class="num">5.18%</td></tr>
+        <tr><td>부채총계</td><td class="num">665조 156억</td><td>부채비율</td><td class="num">1,372.66%</td></tr>
+        <tr><td>자본총계</td><td class="num">48조 4,472억</td><td>전기말 대비 자산증가율</td><td class="num">+5.76%</td></tr>
+      </table>
+      <div class="src">(출처: OpenDART)</div>
+
+      <h2>최근 공시 (DART)</h2>
+      <ul>
+        <li><span class="date">2026-08-26</span>[기재정정] 주식소각결정</li>
+        <li><span class="date">2026-08-25</span>최대주주등소유주식변동신고서</li>
+        <li><span class="date">2026-08-19</span>기업설명회(IR) 개최(안내공시)</li>
+        <li><span class="date">2026-08-14</span>[기재정정] 사업보고서 (2025.12)</li>
+      </ul>
+      <div class="src">(출처: OpenDART)</div>
+    </div>
+
+    <div>
+      <h2>최근 뉴스 · 이슈 (2026-09-04)</h2>
+      <ul>
+        <li><span class="date">2026-09-04</span>거래소 외국인 순매도상위에 전기·전자 업종 5종목 (하나금융지주 관련 세부 내용은 조회 불가)</li>
+        <li><span class="date">2026-09-04</span>증시요약(8) - 기술적 분석 특징주 B(코스피)</li>
+        <li><span class="date">2026-09-04</span>외국계 순매수·도 상위종목(코스피) 금액기준</li>
+        <li><span class="date">2026-09-04</span>오후장 기술적 분석 특징주 B(코스피)</li>
+      </ul>
+      <div class="src">(출처: 한국 주식 정보 뉴스 API — 제목만 조회됨, 본문·개별 의미 해석은 조회 불가)</div>
+
+      <h2>주요 주주 현황 (2025-12-31 기준)</h2>
+      <table>
+        <tr><td>국민연금공단 (최대주주)</td><td class="num">8.66%</td></tr>
+        <tr><td>주주 2 또는 변동 사항</td><td class="num">조회 불가</td></tr>
+        <tr><td>지배구조 특징</td><td class="num">조회 불가</td></tr>
+      </table>
+      <div class="src">(출처: OpenDART)</div>
+
+      <div class="topics" style="margin-top:18px">
+        <h2>미팅 체크포인트 제안</h2>
+        <ol>
+          <li>부채비율 1,372.66%(전기말 1,377.99% 대비 소폭 완화)의 배경과 지주회사 특성상 레버리지 수준의 적정성</li>
+          <li>최대주주(국민연금공단) 지분율이 9.23%→8.66%로 축소된 배경과 지배구조·경영권 안정성에 미치는 영향</li>
+          <li>최근 거래량 감소(-6.7%)와 주가 변동성(9/4 -3.73%) 이면의 수급 요인</li>
+          <li>8/26 자사주 소각 결정의 주주환원 정책 방향과 향후 추가 계획</li>
+          <li>반기 순이자이익(+3.9%)·수수료이익(+29.9%) 성장세의 지속 가능성 및 이자비용 부담 관리 방안</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <footer>자료 출처: OpenDART(사업보고서/반기보고서, 접수번호 20260814003800 · 20260814004019) · 한국 주식 정보(2026-09-05 02:39 UTC 기준) · 네이버 검색(조회 불가 — 본 보고서는 PlayMCP 한국 주식 정보 뉴스 API로 대체 조회). 도구로 조회하지 못한 값은 "조회 불가"로 표기했습니다. 투자 판단의 근거로 사용하지 마세요.</footer>
+</body>
+</html>
