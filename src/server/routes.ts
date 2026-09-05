@@ -3542,9 +3542,17 @@ export function registerRoutes(app: Hono): void {
     return c.json(out);
   });
   app.post("/api/mcp/install", async (c) => {
-    const body = await c.req.json<{ name?: string; command?: string; args?: string[]; env?: Record<string, string>; mode?: string; agentRole?: string; reason?: string }>().catch(() => null);
-    if (!body?.name || !body?.command) return c.json({ error: "name, command required" }, 400);
+    const body = await c.req.json<{
+      name?: string; command?: string; args?: string[]; env?: Record<string, string>; mode?: string; agentRole?: string; reason?: string;
+      url?: string; headers?: Record<string, string>; toolModes?: { allow?: string[]; approval?: string[] };
+    }>().catch(() => null);
+    if (!body?.name || (!body?.command && !body?.url)) return c.json({ error: "name + (command | url) required" }, 400);
     const mode = body.mode === "allow" ? "allow" : "approval";
+    // 토큰 실값 유입 차단 — headers/env 값은 `${ENV_NAME}` 플레이스홀더만 허용 (실값은 키 볼트/.env).
+    const looksLikeSecret = (v: string) => /bearer\s+\S{16,}|^[A-Za-z0-9_\-]{32,}$/i.test(v) && !/\$\{[A-Z0-9_]+\}/.test(v);
+    for (const v of [...Object.values(body.headers ?? {}), ...Object.values(body.env ?? {})]) {
+      if (looksLikeSecret(v)) return c.json({ error: "headers/env에 토큰 실값 금지 — ${ENV_NAME} 플레이스홀더로 넣고 키 볼트에 등록하세요" }, 400);
+    }
     const getAgentDisplayName = (id: string): string => {
       if (id === "genie") return getGenieName();
       const a = getWorkerAgent(id);
@@ -3552,11 +3560,12 @@ export function registerRoutes(app: Hono): void {
     };
     // agentName/reason 필드는 운영 createApproval 시그니처에 없음 — 향후 확장 시 추가.
     void getAgentDisplayName; // unused under operational schema
-    const cmdPreview = `${body.command} ${(body.args ?? []).join(" ")}`.trim();
+    const cmdPreview = body.url ? `http ${body.url}` : `${body.command} ${(body.args ?? []).join(" ")}`.trim();
     const req = createApproval({
       agentRole: body.agentRole ?? "orchestrator",
       tool: "McpInstall",
       path: `${body.name}: ${cmdPreview}`,
+      reason: body.reason,
     });
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
@@ -3564,7 +3573,9 @@ export function registerRoutes(app: Hono): void {
       const st = getApprovalStatus(req.id);
       if (st && st.status !== "pending_chat") {
         if (st.status === "allowed") {
-          addMcpServer(body.name, { command: body.command, args: body.args, env: body.env, mode });
+          addMcpServer(body.name, body.url
+            ? { type: "http", url: body.url, headers: body.headers, mode, toolModes: body.toolModes }
+            : { command: body.command!, args: body.args, env: body.env, mode, toolModes: body.toolModes });
           return c.json({ ok: true, installed: body.name, mode });
         }
         return c.json({ ok: false, denied: true, status: st.status }, 200);

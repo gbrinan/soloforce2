@@ -117,6 +117,7 @@
 | 예약 | Supabase URL/Key, Resend API Key | [supabase.com](https://supabase.com) / [resend.com](https://resend.com) | 예약 저장·메일 발송 비활성 |
 | 지도 | MapTiler/Google Maps Key (선택) | 각 앱 폴더 `.env.example` 참고 | 무료 지도·검색 폴백 |
 | PDF | Stirling-PDF 서버 주소 (선택) | 로컬 Docker (`stirlingtools/stirling-pdf`) | 고급 변환 기능만 비활성 |
+| 카카오 툴박스 (비서·데일리컨시어지) | PlayMCP 툴박스 토큰 | [playmcp.kakao.com/toolbox](https://playmcp.kakao.com/toolbox) → 외부 에이전트 연결 | 톡캘린더·카톡 나에게 보내기·네이버검색 도구 미연결 ("미연결"로 보고) |
 
 **설정 방법 (둘 중 하나):**
 1. **대시보드에서**: 설정(⚙️) → **키 볼트**에 키 입력 → 해당 앱 재시작 (비서에게 "○○ 앱 재시작해줘")

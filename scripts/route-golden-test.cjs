@@ -18,6 +18,11 @@ for (const a of g.staticAssets) {
   console.log(`${ok ? "[PASS]" : "[FAIL]"} 자산: ${a}${ok ? "" : " — " + fp + " 없음"}`);
   if (!ok) fail++;
 }
+for (const h of g.hookScripts ?? []) {
+  const ok = fs.existsSync(h);
+  console.log(`${ok ? "[PASS]" : "[FAIL]"} 훅: ${h}${ok ? "" : " — 없음 (approval 모드 MCP fail-open)"}`);
+  if (!ok) fail++;
+}
 const base = process.env.ROUTE_GOLDEN_BASE;
 if (base) {
   (async () => {

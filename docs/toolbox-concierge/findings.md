@@ -115,6 +115,8 @@
 | 정기 알림 발송은 MCP가 아니라 서버측 REST(나에게 보내기 + refresh token)로 | OTT/OAuth 도구는 사람의 재인증을 전제하므로 08:40 루프가 조용히 실패한다. 에이전트가 즉석에서 보내는 건은 MCP(승인), 루프 결과 배달은 서버 notify 경로 |
 | 카톡봇은 직원이 아니라 **채널 어댑터**(텔레그램·음성과 동형) | 봇은 마이크루의 입출력 표면이다. 처리·위임·라우팅은 기존 경로 그대로 |
 | 카톡봇 착수 전 `telegram.ts`에서 채널 계약을 추출한다 | 두 번째 양방향 채널을 복제로 만들면 페어링·인젝션·승인 규칙이 드리프트한다 |
+| 도구 단위 allow는 `--allowedTools`가 아니라 훅의 allow 결정으로 | Claude Code allowedTools는 `mcp__server__tool` 정확 일치·`mcp__server` 통째만 받고 도구명 글롭이 없다. PreToolUse의 `permissionDecision: allow`가 권한 체계를 우회하므로 toolModes 서버는 통째 허용에서 빼고 훅이 판정한다 |
+| 시크릿 미정의 서버는 spawn에서 제외(errors), 프로세스는 계속 | 워커 spawn 전체를 죽이면 다른 도구까지 잃는다. 해당 서버만 빠지고 사유는 서버 로그 + `errors` |
 | 자동 등재 meta.json에 `mcpServers` 필드를 추가하지 않음 | 할당 정본은 `history/agents.json`(manage_mcp)이라 이중 정본이 생김. 씨앗 문서에는 "권장 할당"을 주석으로만 둔다 |
 
 ## Issues Encountered
@@ -135,9 +137,11 @@
 
 **원인**: clean v0 재시작 때 gbrinan/soloforce의 `scripts/` 일부가 이식되지 않은 것으로 보인다. 라이브 머신에는 untracked로 남아 있을 수 있다.
 
-**해결**: 미정 — 본 사이클의 **Step 0 선행 과제**. gbrinan/soloforce에서 두 훅과 계약 테스트를 이식하거나 재작성하고, `route-golden`류 정적 검사에 "훅 파일 존재"를 추가한다.
+**해결**: gbrinan/soloforce(HEAD 및 최근 400커밋)에도 세 훅(`agent-event-hook.mjs` 포함)이 없어 **재작성**했다. 승인 훅은 서버 미응답·파싱 실패·타임아웃을 전부 exit 2(차단)로 끝내고, `MYCREW_MCP_TOOL_MODES`로 도구 단위 allow를 판정한다. `config/route-golden.json`의 `hookScripts`로 존재 검사를 걸었고 `npm test`에 `route-golden-test.cjs`를 넣었다.
 
-**결과**: 미해결. 훅 파일이 없으면 approval 모드 MCP 도구가 승인 없이 실행된다(node가 모듈을 못 찾아 exit 1 → Claude Code는 exit 2만 차단하므로 **fail-open**). 카톡 발송·선물 같은 쓰기 도구를 approval에 맡기는 본 설계의 전제가 무너지므로, 이 결함을 닫기 전에는 PlayMCP 쓰기 도구를 어느 직원에게도 할당하지 않는다.
+**결과**: 해결 (2026-09-05). 추가 발견: `claude -p` 잡 경로(`src/agent.ts`)에는 승인 훅이 아예 배선돼 있지 않았고 모든 할당 서버를 `mcp__<name>` 와일드카드로 통째 허용하고 있었다. 이번에 훅·env를 -p 경로에도 배선하고 와일드카드는 allow 서버에만 준다.
+
+**이전 상태 기록**: 미해결이던 시점의 판단 — 훅 파일이 없으면 approval 모드 MCP 도구가 승인 없이 실행된다(node가 모듈을 못 찾아 exit 1 → Claude Code는 exit 2만 차단하므로 **fail-open**). 카톡 발송·선물 같은 쓰기 도구를 approval에 맡기는 본 설계의 전제가 무너지므로, 이 결함을 닫기 전에는 PlayMCP 쓰기 도구를 어느 직원에게도 할당하지 않는다.
 
 ## Learnings
 

@@ -276,6 +276,8 @@ deep 모드는 quick보다 훨씬 많은 시간·토큰을 소모합니다. deep
 | 코드·개발 | CTO(dev-pm) — planGate 후 팀 위임 | |
 | 검증·팩트체크 | CQO | 개발 중 테스트는 tester |
 | 반복·배치·셸 작업 | hermes (결합 모드 시 상주) | |
+| 툴박스·MCP 연결, "카톡으로 받고 싶어" | 마이크루 직접 — `config/skill-templates/toolbox-concierge.md` 인터뷰 후 manage_mcp | 반복 실행은 daily-concierge |
+| 아침 브리핑·"오늘 일정 알려줘" | daily-concierge | 발송은 승인카드, 루프는 draft_only 시작 |
 
 ## 인제스트 2레인 (지식 적재 라우팅)
 

@@ -10,6 +10,12 @@
   "staticAssets": [
     "/vad/silero_vad_legacy.onnx"
   ],
+  "_hookNote": "spawn 코드(worker-pty·terminal-ws·agent.ts)가 참조하는 훅 스크립트. 없으면 approval 모드 MCP가 fail-open이 된다 (docs/toolbox-concierge/findings.md Issue 2).",
+  "hookScripts": [
+    "scripts/mcp-approval-hook.mjs",
+    "scripts/stop-response-hook.mjs",
+    "scripts/agent-event-hook.mjs"
+  ],
   "sourceMustMention": {
     "/api/voice": "src/server",
     "/vad/": "src/server"

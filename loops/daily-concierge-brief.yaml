@@ -1,0 +1,41 @@
+# 데일리 컨시어지 아침 브리핑 — 평일 08:40 KST (spf 카톡 다이제스트 08:30 뒤 스태거).
+# PlayMCP 툴박스(톡캘린더·NaverSearch) + 메일로 한 장 브리핑 → 채팅 보고.
+# 첫 주는 draft_only: 카톡 '나와의 채팅방' 발송 도구를 호출하지 않는다. 검토 후 approval 모드로 승격.
+# 전제: 마이크루가 manage_mcp assign으로 daily-concierge에 PlayMCP를 할당해 둘 것 (없으면 "미연결"로 보고).
+loop:
+  id: daily-concierge-brief
+  version: "1"
+  owner: genie
+  description: "평일 아침 브리핑 (일정·답장 필요 메일·관심 뉴스) → 채팅 보고, 승격 시 카톡 나에게 발송"
+  enabled: false # 사용자 승인 후 true
+
+  trigger:
+    type: cron
+    cron: "40 8 * * 1-5"
+    timezone: Asia/Seoul
+    catch_up: skip
+
+  steps:
+    - id: brief
+      agent: daily-concierge
+      model_tier: standard
+      prompt: >
+        [아침 브리핑] 롤 디렉티브의 표준 절차 1~5를 그대로 수행하라.
+        배달은 채팅 보고만 한다(draft_only). 카톡 발송 도구는 호출하지 않는다.
+        수집 실패·미연결은 지어내지 말고 그대로 표기한다.
+
+  budget:
+    max_cost_usd_per_run: 0.5
+    max_duration_minutes: 10
+    max_runs_per_day: 1
+    monthly_cap_usd: 12
+
+  approval:
+    mode: draft_only
+
+  delivery:
+    on_success: full
+    on_failure: full
+
+  expiry:
+    review_after_days: 30

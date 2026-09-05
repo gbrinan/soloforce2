@@ -12,6 +12,19 @@
 
 > `manage_mcp` 액션: **install**(설치) · **assign**(직원에게 켜기) · **unassign**(직원에게서 끄기) · **list**(현황).
 
+## 원격(HTTP) MCP — PlayMCP·Notion 등
+- `command` 대신 **`url`** 로 설치: `manage_mcp action:install name:PlayMCP url:<엔드포인트> headers:{Authorization:"Bearer ${PLAYMCP_TOKEN}"}`.
+- 토큰은 **플레이스홀더만**. `${ENV_NAME}`은 spawn 시 `.env`/키 볼트 값으로 치환되고, 미정의면 그 서버만 부착에서 빠진다(fail-closed, 서버 로그에 사유). 실값을 넣으면 설치 자체가 400으로 거부된다.
+- 사용자에겐 "키 볼트(설정 → 키)의 *PlayMCP 툴박스 토큰*에 붙여넣어 달라"고 안내. 정본 키 이름은 `.env.example`.
+
+## 도구 단위 모드 (`toolModes`)
+- 한 서버 안에서 읽기(조회·검색)는 승인 없이, 쓰기(발송·등록·결제)는 승인카드로 나누려면 install 시 `toolModes:{allow:["*-list*","*-get*","*-search*"]}`.
+- 판정 순서: `toolModes.approval` 매칭 → 승인카드 / `toolModes.allow` 매칭 → 통과 / 둘 다 아니면 서버 `mode`(기본 approval).
+- 도구명은 서버 접두(`mcp__<name>__`)를 뺀 부분 기준. PlayMCP 게이트웨이는 `<서버>-<도구>`(예: `NaverSearch-search_news`)로 온다.
+
+## 요구 인터뷰
+- 사용자가 무엇을 원하는지 뭉툭하면 `config/skill-templates/toolbox-concierge.md` 절차로 먼저 묻고 매핑표를 승인받은 뒤 설치한다.
+
 ## 저장 위치 (소스 수정·커밋 불필요)
 - 설치 = `history/mcp-registry.json`(데이터)에 등록. **`src/server/mcp-registry.ts`(소스)는 안 건드림** — 거긴 기본 배포판 시드용일 뿐.
 - 할당 = `history/agents.json`/`history/genie-config.json` 수정 + 해당 직원 재spawn. 모두 gitignore라 커밋 불필요.

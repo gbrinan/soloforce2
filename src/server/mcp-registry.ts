@@ -12,11 +12,69 @@ import { homedir } from "node:os";
 import { HISTORY_DIR } from "../config.js";
 
 export interface McpServerDef {
-  command: string;
+  /** 전송 방식. 미지정 = stdio(command 필수). http = 원격 MCP(url 필수, PlayMCP·Notion 등). */
+  type?: "stdio" | "http";
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
   // allow: allowedTools에 넣어 승인 없이 사용 / approval: PreToolUse 훅 → 승인카드 경유
   mode?: "allow" | "approval";
+  /**
+   * 도구 단위 모드 (glob: * ? 지원, 서버 접두 `mcp__<name>__` 제외한 도구명 기준).
+   * allow에 맞으면 승인 없이 통과, approval에 맞으면 승인카드, 둘 다 아니면 `mode`(기본 approval).
+   * 있으면 서버 전체가 PreToolUse 훅 관할이 된다(훅이 allow/approval을 판정).
+   */
+  toolModes?: { allow?: string[]; approval?: string[] };
+}
+
+/** `${ENV_NAME}` 플레이스홀더를 process.env로 치환. 미정의 변수는 throw(fail-closed) — 토큰 실값은 레지스트리 파일에 두지 않는다. */
+export function interpolateSecrets(
+  values: Record<string, string> | undefined,
+  ctx: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> | undefined {
+  if (!values) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) {
+    out[k] = v.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name: string) => {
+      const val = env[name];
+      if (val === undefined || val === "") throw new Error(`${ctx}: 환경변수 ${name} 미설정 (키 볼트/.env에 등록 필요)`);
+      return val;
+    });
+  }
+  return out;
+}
+
+/** glob(`*`,`?`) → 정규식 소스. 나머지 문자는 리터럴 이스케이프. */
+export function globToRegexSource(glob: string): string {
+  return glob.split("").map((ch) => {
+    if (ch === "*") return ".*";
+    if (ch === "?") return ".";
+    return ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }).join("");
+}
+
+export interface McpToolModes {
+  allow: string[];     // 도구명 정규식 소스(접두 제외)
+  approval: string[];
+  default: "allow" | "approval";
+}
+
+/** 서버 1건의 도구 단위 모드를 훅이 읽을 형태로 해석. toolModes 없으면 undefined(서버 단위 mode 그대로). */
+export function toolModesFor(def: McpServerDef): McpToolModes | undefined {
+  if (!def.toolModes) return undefined;
+  return {
+    allow: (def.toolModes.allow ?? []).map(globToRegexSource),
+    approval: (def.toolModes.approval ?? []).map(globToRegexSource),
+    default: def.mode === "allow" ? "allow" : "approval",
+  };
+}
+
+/** 훅(scripts/mcp-approval-hook.mjs)에 넘길 MYCREW_MCP_TOOL_MODES 값. */
+export function serializeToolModes(modes: Record<string, McpToolModes>): string {
+  return JSON.stringify(modes);
 }
 
 const REGISTRY_FILE = join(HISTORY_DIR, "mcp-registry.json");
@@ -186,6 +244,7 @@ export function resolveCommandPath(
   command: string,
   args: string[] = [],
 ): { command: string; args: string[] } {
+  if (!command) return { command, args };
   const bare = basename(command).replace(/\.(exe|cmd|bat)$/i, "").toLowerCase();
 
   // `cmd /c npx -y pkg` → `npx -y pkg` 로 벗긴 뒤 재해석
@@ -228,26 +287,71 @@ export function buildMcpServerEntry(
   return { command, args, ...(def?.env ? { env: def.env } : {}) };
 }
 
+export type McpSpawnEntry =
+  | { command: string; args?: string[]; env?: Record<string, string> }
+  | { type: "http"; url: string; headers?: Record<string, string> };
+
+/**
+ * 레지스트리 정의 1건 → spawn 엔트리. 시크릿 치환 포함(미정의면 throw).
+ * http: url/headers 그대로(커맨드 해석 없음). stdio: resolveCommandPath로 절대경로화.
+ */
+export function buildSpawnEntry(name: string, def: McpServerDef, env: NodeJS.ProcessEnv = process.env): McpSpawnEntry {
+  if (def.type === "http") {
+    if (!def.url) throw new Error(`${name}: http 서버에 url 없음`);
+    const headers = interpolateSecrets(def.headers, name, env);
+    return { type: "http", url: def.url, ...(headers ? { headers } : {}) };
+  }
+  if (!def.command) throw new Error(`${name}: stdio 서버에 command 없음`);
+  const resolved = resolveCommandPath(name, def.command, def.args ?? []);
+  const envVals = interpolateSecrets(def.env, name, env);
+  return buildMcpServerEntry(resolved.command, resolved.args, envVals ? { env: envVals } : undefined);
+}
+
 /**
  * 에이전트의 mcpServers 할당을 레지스트리 정의로 해석.
- * 반환: spawn --mcp-config에 넣을 서버 맵 + allow/approval 분류.
+ * 반환: spawn --mcp-config에 넣을 서버 맵 + allow/approval 분류 + 도구 단위 모드.
+ * - allowNames   : 서버 통째 allow(allowedTools에 mcp__<name>) — toolModes 없는 mode=allow
+ * - approvalNames: PreToolUse 훅 관할 — mode=approval 또는 toolModes 보유(훅이 도구별 판정)
+ * - toolModes    : 훅에 MYCREW_MCP_TOOL_MODES로 넘길 맵
+ * - errors       : 시크릿 미정의·정의 결함으로 spawn에서 제외된 서버(fail-closed)
  */
-export function resolveAgentMcpServers(assigned: string[] | undefined): {
-  servers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
-  allowNames: string[];     // mode=allow → allowedTools에 mcp__<name> 추가
-  approvalNames: string[];  // mode=approval → PreToolUse 훅 매처 추가
+export function resolveAgentMcpServers(assigned: string[] | undefined, env: NodeJS.ProcessEnv = process.env): {
+  servers: Record<string, McpSpawnEntry>;
+  allowNames: string[];
+  approvalNames: string[];
+  toolModes: Record<string, McpToolModes>;
+  errors: string[];
 } {
   const reg = loadMcpRegistry();
-  const servers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
+  return resolveFromRegistry(reg, assigned, env);
+}
+
+/** resolveAgentMcpServers의 순수 코어 — 픽스처 테스트용으로 레지스트리를 주입받는다. */
+export function resolveFromRegistry(
+  reg: Record<string, McpServerDef>,
+  assigned: string[] | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): ReturnType<typeof resolveAgentMcpServers> {
+  const servers: Record<string, McpSpawnEntry> = {};
   const allowNames: string[] = [];
   const approvalNames: string[] = [];
+  const toolModes: Record<string, McpToolModes> = {};
+  const errors: string[] = [];
   for (const name of assigned ?? []) {
     const def = reg[name];
     if (!def) { console.warn(`[McpRegistry] 미정의 서버 할당 무시: ${name}`); continue; }
-    const resolved = resolveCommandPath(name, def.command, def.args ?? []);
-    servers[name] = { command: resolved.command, args: resolved.args, env: def.env };
-    if (def.mode === "allow") allowNames.push(name);
+    try {
+      servers[name] = buildSpawnEntry(name, def, env);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[McpRegistry] ${name} 제외 (fail-closed): ${msg}`);
+      errors.push(msg);
+      continue;
+    }
+    const tm = toolModesFor(def);
+    if (tm) { toolModes[name] = tm; approvalNames.push(name); }
+    else if (def.mode === "allow") allowNames.push(name);
     else approvalNames.push(name);  // 기본 approval (안전)
   }
-  return { servers, allowNames, approvalNames };
+  return { servers, allowNames, approvalNames, toolModes, errors };
 }

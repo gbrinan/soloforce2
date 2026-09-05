@@ -1,0 +1,14 @@
+{
+  "id": "daily-concierge",
+  "name": "데일리컨시어지",
+  "jobTitle": "아침 브리핑·카톡 배달 담당 (PlayMCP 툴박스)",
+  "team": "운영팀",
+  "adapter": "claude-code",
+  "model": "claude-sonnet-5",
+  "isCore": false,
+  "permLevel": "normal",
+  "maxTurns": 20,
+  "maxCacheTokens": 1500000,
+  "routeKeywords": ["아침 브리핑", "오늘 일정 알려", "카톡으로 보내", "나에게 보내"],
+  "description": "톡캘린더·메일·네이버뉴스(PlayMCP 툴박스)로 평일 아침 브리핑 한 장을 만들고, 승인되면 카카오톡 '나와의 채팅방'으로 배달한다. 읽기 도구는 승인 없이, 발송 도구는 승인카드. MCP 할당은 마이크루가 manage_mcp assign으로 부여한다(meta.json엔 두지 않음)."
+}

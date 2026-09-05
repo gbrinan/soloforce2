@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { AgentPty, claudeSessionExists, SUBMIT_RESPONSE_DIRECTIVE } from "./agent-pty.js";
 import { buildPermissionArgs } from "../agent.js";
-import { resolveAgentMcpServers } from "./mcp-registry.js";
+import { resolveAgentMcpServers, serializeToolModes } from "./mcp-registry.js";
 import { CLAUDE_PATH, CLAUDE_BIN_DIR, PROJECT_SELF_DIR, MYCREW_HOME, PROJECTS_DIR, TSX_BIN, TSX_CLI_ARGS } from "../config.js";
 import { IS_WIN } from "./utils/platform.js";
 import { safeChildEnv } from "./utils/safeChildEnv.js";
@@ -54,7 +54,7 @@ async function buildWorkerSpawn(config: AgentConfig) {
   const hasBash = config.allowedTools.includes("Bash") || (config.bashCommands?.length ?? 0) > 0;
   const base = `http://127.0.0.1:${port}`;
   // 할당된 MCP 서버를 레지스트리에서 해석 (safefs는 아래에 항상 직접 포함)
-  const { servers: extraMcp, allowNames, approvalNames } = resolveAgentMcpServers(config.mcpServers);
+  const { servers: extraMcp, allowNames, approvalNames, toolModes: mcpToolModes } = resolveAgentMcpServers(config.mcpServers);
 
   writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
@@ -155,6 +155,8 @@ async function buildWorkerSpawn(config: AgentConfig) {
       MYCREW_APPROVAL_BASE: base,
       MYCREW_AGENT_ROLE: config.role,
       MYCREW_JOB_ID: `worker-${agentId}`,
+      // 도구 단위 모드(toolModes) — 훅이 읽기 도구는 즉시 allow, 나머지는 승인카드
+      MYCREW_MCP_TOOL_MODES: serializeToolModes(mcpToolModes),
       // Stop 훅이 턴 종료 시 워커 보고를 전달할 대상 (멱등 — awaiter 없으면 receiveWorkerResponse가 no-op)
       MYCREW_STOP_SUBMIT_URL: `${base}/api/agent-response/${agentId}`,
     }),

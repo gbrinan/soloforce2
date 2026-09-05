@@ -1398,18 +1398,22 @@ if (GENIE_ACTION_BASE) {
 
   server.tool(
     "manage_mcp",
-    "MCP 서버 설치/할당 관리. install=레지스트리에 설치(사용자 승인카드 거침, ~60초 대기), assign/unassign=직원에게 켜기/끄기(해당 직원 재시작), list=현황. 설치는 임의 명령 실행이라 반드시 사용자 승인이 필요합니다.",
+    "MCP 서버 설치/할당 관리. install=레지스트리에 설치(사용자 승인카드 거침, ~60초 대기), assign/unassign=직원에게 켜기/끄기(해당 직원 재시작), list=현황. 설치는 임의 명령 실행이라 반드시 사용자 승인이 필요합니다. 원격(HTTP) MCP는 command 대신 url. 토큰은 headers에 실값 대신 `${ENV_NAME}` 플레이스홀더(예: Authorization: 'Bearer ${PLAYMCP_TOKEN}')로 넣고 키 볼트에 등록하게 하세요.",
     {
       action: z.enum(["install", "uninstall", "assign", "unassign", "list"]),
       name: z.string().optional().describe("install/uninstall 시 서버 이름"),
-      command: z.string().optional().describe("install 시 실행 명령 (예: npx)"),
+      command: z.string().optional().describe("install 시 실행 명령 (예: npx) — stdio 서버"),
       args: z.array(z.string()).optional().describe("install 시 명령 인자"),
+      url: z.string().optional().describe("install 시 원격 HTTP MCP 엔드포인트 (command 대신)"),
+      headers: z.record(z.string(), z.string()).optional().describe("install 시 HTTP 헤더. 값에 ${ENV_NAME} 플레이스홀더만 — 토큰 실값 금지"),
+      toolModes: z.object({ allow: z.array(z.string()).optional(), approval: z.array(z.string()).optional() }).optional()
+        .describe("도구 단위 모드(glob). 예: allow ['*list*','*get*','*search*'] → 읽기는 승인 없이, 나머지는 mode(기본 approval)"),
       mode: z.enum(["allow", "approval"]).optional().describe("install 시 권한 처리 (기본 approval)"),
       agentId: z.string().optional().describe("assign/unassign 시 대상 직원 id (genie 포함)"),
       server: z.string().optional().describe("assign/unassign 시 서버 이름"),
       reason: z.string().optional().describe("install 시 설치 사유 한 줄"),
     },
-    async ({ action, name, command, args, mode, agentId, server, reason }) => {
+    async ({ action, name, command, args, url, headers, toolModes, mode, agentId, server, reason }) => {
       const base = GENIE_ACTION_BASE;
       try {
         if (action === "list") {
@@ -1420,13 +1424,14 @@ if (GENIE_ACTION_BASE) {
           return { content: [{ type: "text" as const, text: `설치됨: ${Object.keys(reg).join(", ") || "(없음)"}\n할당: ${JSON.stringify(asg)}` }] };
         }
         if (action === "install") {
-          if (!name || !command) return { isError: true, content: [{ type: "text" as const, text: "install엔 name·command 필요" }] };
+          if (!name || (!command && !url)) return { isError: true, content: [{ type: "text" as const, text: "install엔 name + (command | url) 필요" }] };
           const res = await fetch(`${base}/api/mcp/install`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, command, args, mode, reason, agentRole: AGENT_ROLE }),
+            body: JSON.stringify({ name, command, args, url, headers, toolModes, mode, reason, agentRole: AGENT_ROLE }),
           });
           const data = await res.json().catch(() => ({}));
           if (data.ok) return { content: [{ type: "text" as const, text: `설치 완료: ${name} (mode=${data.mode}). 이제 manage_mcp(assign)으로 직원에게 할당하세요.` }] };
+          if (data.error) return { isError: true, content: [{ type: "text" as const, text: `설치 거부: ${data.error}` }] };
           return { content: [{ type: "text" as const, text: `설치 안 됨 (${data.status ?? "거부"}). 사용자가 승인하지 않았습니다.` }] };
         }
         if (action === "uninstall") {

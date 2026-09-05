@@ -31,6 +31,8 @@ const PRESET_KEYS: KeyDef[] = [
   { id: "kakao-rest",    label: "Kakao REST Key (책장 앱 — 도서 검색)",     scope: "server", envName: "KAKAO_REST_KEY" },
   { id: "naver-id",      label: "Naver Client ID (책장 앱 — 도서 검색)",    scope: "server", envName: "NAVER_CLIENT_ID" },
   { id: "naver-secret",  label: "Naver Client Secret (책장 앱)",            scope: "server", envName: "NAVER_CLIENT_SECRET" },
+  // 원격 MCP 토큰 — mcp-registry headers의 ${PLAYMCP_TOKEN} 플레이스홀더가 spawn 시 이 값으로 치환된다.
+  { id: "playmcp",       label: "PlayMCP 툴박스 토큰 (카카오 원격 MCP)",      scope: "server", envName: "PLAYMCP_TOKEN" },
 ];
 
 export function maskKeyValue(value: string): string {

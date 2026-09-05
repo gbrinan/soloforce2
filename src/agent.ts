@@ -11,7 +11,13 @@ import { safeKill } from "./server/utils/platform.js";
 import { OVERLOAD_BACKOFFS_MS, isApiOverloadError, sleep, withJitter } from "./claude-error-retry.js";
 import { startAgentSpan } from "./server/otel-trace.js";
 import { listManifests } from "./server/app-registry.js";
-import { buildMcpServerEntry, getMcpServerDef, resolveCommandPath } from "./server/mcp-registry.js";
+import { buildMcpServerEntry, getMcpServerDef, resolveCommandPath, resolveAgentMcpServers, serializeToolModes, interpolateSecrets } from "./server/mcp-registry.js";
+
+/** env `${VAR}` 치환. 미정의면 서버를 부착하지 않는다(null) — 플레이스홀더를 자식에 넘기지 않는다. */
+function interpolateSecretsOrSkip(name: string, env: Record<string, string> | undefined): Record<string, string> | undefined | null {
+  try { return interpolateSecrets(env, name); }
+  catch (e) { console.error(`[MCP] ${name} 제외 (fail-closed): ${e instanceof Error ? e.message : e}`); return null; }
+}
 import { resolveEffort } from "./server/effort-policy.js";
 
 export interface RunAgentOptions {
@@ -241,9 +247,10 @@ export function buildPermissionArgs(config: AgentConfig, opts?: { interactive?: 
     );
   }
   // registry MCP(notion/excel/lighthouse 등): allow 모드 서버의 도구를 서버 단위로 허용.
+  // toolModes가 있는 서버는 훅 관할(도구별 판정)이라 통째 허용에서 제외한다.
   for (const _mcpName of config.mcpServers ?? []) {
     const _def = getMcpServerDef(_mcpName);
-    if (_def && _def.mode === "allow") mcpTools.push(`mcp__${_mcpName}`);
+    if (_def && _def.mode === "allow" && !_def.toolModes) mcpTools.push(`mcp__${_mcpName}`);
   }
   assertToolsetNotEmpty(config, mcpTools);
   const effectiveAllowedTools = mcpTools.length > 0
@@ -343,8 +350,11 @@ export async function runAgent(
   // 활성(길이>0)일 때 mcp__<server> 와일드카드가 없으면 그 서버 도구 호출이 전부 차단된다.
   // (로컬 @notionhq 쓰기 도구 mcp__notion__API-post-page 등이 미동작하던 근본 원인.)
   // allowlist가 비어 있으면(=전체 허용) 손대지 않는다 — 축소 회귀 방지.
-  if (effectiveAllowedTools.length > 0 && (config.mcpServers?.length ?? 0) > 0) {
-    for (const _srv of config.mcpServers!) {
+  // 승인(approval)·도구 단위(toolModes) 서버는 아래 PreToolUse 훅이 allow/deny를 판정하므로
+  // 와일드카드를 넣지 않는다 — 훅의 allow 결정이 권한 체계를 우회해 실행되고, deny는 차단된다.
+  const _registryResolved = resolveAgentMcpServers(config.mcpServers);
+  if (effectiveAllowedTools.length > 0) {
+    for (const _srv of _registryResolved.allowNames) {
       const _wild = `mcp__${_srv}`;
       if (!effectiveAllowedTools.includes(_wild)) effectiveAllowedTools.push(_wild);
     }
@@ -365,9 +375,29 @@ export async function runAgent(
   args.push("--disallowedTools", disallowed.join(","));
 
   const permSettings = buildPermissionSettings(config.writePaths, config.denyPaths);
-  if (permSettings) {
-    args.push("--settings", JSON.stringify(permSettings));
+  // approval 모드·toolModes 서버 → PreToolUse 훅(승인카드). -p 경로에도 동일 계약을 건다
+  // (2026-09-05 이전엔 이 경로에 훅이 없어 approval 모드가 잡 실행에서 무의미했다).
+  const approvalHookSettings: Record<string, unknown> = {};
+  if (_registryResolved.approvalNames.length > 0) {
+    const hookCmd = `node "${join(PROJECT_SELF_DIR, "scripts", "mcp-approval-hook.mjs")}"`;
+    approvalHookSettings.hooks = {
+      PreToolUse: _registryResolved.approvalNames.map((n) => ({
+        matcher: `mcp__${n}__.*`,
+        hooks: [{ type: "command", command: hookCmd, timeout: 70 }],
+      })),
+    };
   }
+  if (permSettings || approvalHookSettings.hooks) {
+    args.push("--settings", JSON.stringify({ ...(permSettings ?? {}), ...approvalHookSettings }));
+  }
+  const hookEnv: Record<string, string> = _registryResolved.approvalNames.length > 0
+    ? {
+        MYCREW_APPROVAL_BASE: `http://127.0.0.1:${process.env.PORT ?? "3456"}`,
+        MYCREW_AGENT_ROLE: config.role,
+        MYCREW_JOB_ID: taskId,
+        MYCREW_MCP_TOOL_MODES: serializeToolModes(_registryResolved.toolModes),
+      }
+    : {};
 
   // MCP 서버 config 임시 파일 (writePaths or readPaths or bash 있는 에이전트)
   // 동일 내용은 캐시 재사용 — 매 호출마다 write/unlink 생략.
@@ -459,6 +489,13 @@ export async function runAgent(
       if ((mcpConfig.mcpServers as Record<string, unknown>)[_mcpName]) continue;
       const _def = getMcpServerDef(_mcpName);
       if (!_def) continue;
+      // http(원격) 서버·시크릿 치환은 공용 해석기 결과를 그대로 쓴다. 시크릿 미정의 등으로
+      // 해석에서 제외된 서버(errors)는 부착하지 않는다(fail-closed).
+      if (_def.type === "http" || !_def.command) {
+        const _entry = _registryResolved.servers[_mcpName];
+        if (_entry) (mcpConfig.mcpServers as Record<string, unknown>)[_mcpName] = _entry;
+        continue;
+      }
       let _cmd: string = _def.command;
       let _args: string[] = _def.args ? [..._def.args] : [];
       // npx/npm 기반 서버는 node.exe 직접 실행으로 변환(PATH·셸 비의존, Windows spawn 안정).
@@ -471,7 +508,9 @@ export async function runAgent(
         const _resolved = resolveCommandPath(_mcpName, _cmd, _args);
         _cmd = _resolved.command; _args = _resolved.args;
       }
-      (mcpConfig.mcpServers as Record<string, unknown>)[_mcpName] = buildMcpServerEntry(_cmd, _args, _def);
+      const _envVals = interpolateSecretsOrSkip(_mcpName, _def.env);
+      if (_envVals === null) continue;
+      (mcpConfig.mcpServers as Record<string, unknown>)[_mcpName] = buildMcpServerEntry(_cmd, _args, _envVals ? { env: _envVals } : undefined);
     }
     mcpConfigPath = getOrCreateMcpConfigPath(JSON.stringify(mcpConfig), config.role);
     args.push("--mcp-config", mcpConfigPath);
@@ -493,6 +532,7 @@ export async function runAgent(
     const extraFromConfig: Record<string, string> = Object.fromEntries(
       (config.allowedEnvKeys ?? [])
         .map((k) => [k, process.env[k]])
+        .concat(Object.entries(hookEnv))
         .filter((e): e is [string, string] => typeof e[1] === "string"),
     );
     const output = streaming

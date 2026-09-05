@@ -23,7 +23,7 @@ import { getGenieSessionInfo, buildSessionContext, setGenieSessionId, addGenieMe
 import { getGenieAgent } from "../agents/genie.js";
 import { effortForConfig } from "./effort-policy.js";
 import { buildPermissionArgs } from "../agent.js";
-import { resolveAgentMcpServers } from "./mcp-registry.js";
+import { resolveAgentMcpServers, serializeToolModes } from "./mcp-registry.js";
 import { listManifests } from "./app-registry.js";
 import { AgentPty, claudeSessionExists, SUBMIT_RESPONSE_DIRECTIVE, type SpawnSpec } from "./agent-pty.js";
 import { computeMemoryDir } from "../mcp/memory-dir.js";
@@ -85,7 +85,7 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
   const port = process.env.PORT ?? "3456";
   const memDir = computeMemoryDir(PROJECT_SELF_DIR);
   // 마이크루에 할당된 MCP 서버를 레지스트리에서 해석 (safefs는 아래에 항상 직접 포함)
-  const { servers: extraMcp, allowNames, approvalNames } = resolveAgentMcpServers(genieConfig.mcpServers);
+  const { servers: extraMcp, allowNames, approvalNames, toolModes: mcpToolModes } = resolveAgentMcpServers(genieConfig.mcpServers);
   writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
       ...extraMcp,
@@ -206,6 +206,8 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
       MYCREW_APPROVAL_BASE: `http://127.0.0.1:${port}`,
       MYCREW_AGENT_ROLE: "orchestrator",
       MYCREW_JOB_ID: "terminal",
+      // 도구 단위 모드(toolModes) — 훅이 읽기 도구는 즉시 allow, 나머지는 승인카드
+      MYCREW_MCP_TOOL_MODES: serializeToolModes(mcpToolModes),
       // Stop 훅(stop-response-hook.mjs)이 턴 종료 시 답을 전달할 대상
       MYCREW_STOP_SUBMIT_URL: `http://127.0.0.1:${port}/api/terminal/stop-finalize`,
     }),
