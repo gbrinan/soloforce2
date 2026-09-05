@@ -129,6 +129,10 @@ Scenario 1: **루프 실행**
 3. daily-concierge 루프 1회 실행에서 읽기 도구는 승인카드 0건, 발송 도구는 승인카드 1건이다
 4. `history/mcp-registry.json`에 토큰 실값이 없다 (grep 검증)
 
+## 선행 조건 (blocking)
+
+- **P0 승인 훅 복원**: `scripts/mcp-approval-hook.mjs`·`scripts/stop-response-hook.mjs`가 리포에 없어 approval 모드가 fail-open이다 (findings Issue 2). 복원·검증 전에는 PlayMCP 쓰기 도구(발송·등록·주문)를 할당하지 않는다. 읽기 도구(allow)는 이 결함과 무관하므로 먼저 진행할 수 있다.
+
 ## Open Questions
 
 - [ ] PlayMCP 게이트웨이 URL·토큰 헤더 이름·만료 주기 — 세션에서 playmcp.kakao.com 접근이 차단되어 미확인. 사용자가 툴박스 페이지의 연결 가이드로 확인해 findings에 기록

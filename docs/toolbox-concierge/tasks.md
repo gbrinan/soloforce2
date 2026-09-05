@@ -26,6 +26,7 @@ PlayMCP 툴박스를 MyCrew에 붙이고, 마이크루가 요구를 인터뷰해
 
 ### Phase 3: Implementation ⏸️
 
+- [ ] Step 0 승인 훅 복원 (`mcp-approval-hook.mjs`, `stop-response-hook.mjs`) + 존재 검사 — **쓰기 도구 할당의 선행 조건**
 - [ ] Step 1 레지스트리 타입·해석 (`mcp-registry.ts`) + 테스트
 - [ ] Step 2 spawn 배선 (`worker-pty.ts`, `terminal-ws.ts`)
 - [ ] Step 3 설치 경로 (`routes.ts`, `safefs-server.ts` manage_mcp)

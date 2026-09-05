@@ -37,7 +37,7 @@
 
 - `config/agents/trend-scout/role-directive.md` — 스카우트 지시서 골격
 - `config/loop-templates/morning-brief.yaml` — 아침 브리핑 루프 골격
-- `scripts/mcp-env-passthrough-test.ts` — 레지스트리 계약 테스트 선례
+- `scripts/safefs-allowlist-test.ts`, `scripts/approval-genie-test.ts` — 픽스처 기반 테스트 선례 (`mcp-env-passthrough-test.ts`는 코드 주석에만 있고 리포에 없음)
 - `src/server/external-injection-filter.ts` — 외부 본문 방어 규칙
 
 ## Architecture
@@ -82,6 +82,12 @@ McpServerDef (기존)
 ```
 
 ## Implementation Steps
+
+### Step 0: 승인 훅 복원 (선행, blocking)
+
+- gbrinan/soloforce에서 `scripts/mcp-approval-hook.mjs`, `scripts/stop-response-hook.mjs`, `scripts/mcp-env-passthrough-test.ts`를 찾아 이식한다. 없으면 재작성: PreToolUse stdin JSON(tool_name·tool_input)을 읽어 `POST /api/approvals`에 승인 요청 → allow면 exit 0, deny·timeout이면 **exit 2**(차단)
+- `scripts/route-golden-test.cjs`류 정적 검사에 두 훅 파일의 존재 검사를 추가해 재발을 막는다
+- 검증: approval 모드 서버(임시로 excel을 approval로) 도구 호출 시 승인카드가 뜨고, deny 시 도구가 실행되지 않는다
 
 ### Step 1: 레지스트리 타입·해석
 

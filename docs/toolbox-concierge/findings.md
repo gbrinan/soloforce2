@@ -84,6 +84,16 @@
 
 **결과**: 설계에는 영향 없음(전송 계층은 표준 HTTP MCP). 구현 착수 전 사용자 확인 필요.
 
+### 2. 승인 훅 스크립트가 리포에 없다 (선행 결함)
+
+**문제**: `worker-pty.ts:112`·`terminal-ws.ts:160`이 `scripts/mcp-approval-hook.mjs`와 `scripts/stop-response-hook.mjs`를 PreToolUse/Stop 훅으로 지정하지만, 두 파일은 soloforce2 git 이력 어디에도 없다 (`.gitignore`는 `scripts/_*`만 제외). `mcp-registry.ts:221`이 계약 테스트로 지목한 `scripts/mcp-env-passthrough-test.ts`도 없다.
+
+**원인**: clean v0 재시작 때 gbrinan/soloforce의 `scripts/` 일부가 이식되지 않은 것으로 보인다. 라이브 머신에는 untracked로 남아 있을 수 있다.
+
+**해결**: 미정 — 본 사이클의 **Step 0 선행 과제**. gbrinan/soloforce에서 두 훅과 계약 테스트를 이식하거나 재작성하고, `route-golden`류 정적 검사에 "훅 파일 존재"를 추가한다.
+
+**결과**: 미해결. 훅 파일이 없으면 approval 모드 MCP 도구가 승인 없이 실행된다(node가 모듈을 못 찾아 exit 1 → Claude Code는 exit 2만 차단하므로 **fail-open**). 카톡 발송·선물 같은 쓰기 도구를 approval에 맡기는 본 설계의 전제가 무너지므로, 이 결함을 닫기 전에는 PlayMCP 쓰기 도구를 어느 직원에게도 할당하지 않는다.
+
 ## Learnings
 
 ### "물어보는 에이전트"는 새 직원이 아니라 오케스트레이터의 절차다 (2026-09-05)
