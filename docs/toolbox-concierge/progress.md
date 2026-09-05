@@ -12,6 +12,7 @@
 2. 읽기 전용 감사: `mcp-registry.ts`, `worker-pty.ts`, `terminal-ws.ts`, `routes.ts`(install), `safefs-server.ts`(ask), `worker-questions.ts`, `key-vault.ts`, `agent-registry.ts`, `config/agents/*`, `loops/*`, `prompts/genie.md`, `docs/org-redesign/spec.md`
 3. PlayMCP 조사: 공식 발표·기술 블로그 + 세션 커넥터 실측 도구 목록. 툴박스 페이지 직접 접근은 egress 차단(findings Issue 1)
 4. 사이클 문서 6종 작성 (README/spec/plan/tasks/findings/progress)
+6. 카카오톡 범위·카톡봇 조사 → findings §카카오톡·§카톡봇·§채널 구조, spec §카카오톡 계층 설계(L1/L2/L3)·채널 관점 개선안 5건 추가
 5. 선행 결함 발견: spawn 코드가 참조하는 승인 훅 2개가 리포에 없음 → findings Issue 2, spec 선행 조건 P0, plan Step 0 추가
 
 **생성/수정 파일**:

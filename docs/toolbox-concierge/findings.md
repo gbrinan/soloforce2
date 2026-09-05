@@ -37,6 +37,41 @@
 - 미확인(세션 egress 차단): 게이트웨이 URL, 인증 헤더 이름, OTT 만료 주기. 로컬에서 툴박스 연결 가이드로 확인해야 한다.
 - Claude Code CLI 2.1.261은 `--transport http` + `--header` 를 지원하고 `--mcp-config` JSON에 `{ "type": "http", "url", "headers" }` 엔트리를 받는다. 로컬 프록시 없이 직접 붙일 수 있다.
 
+### 카카오톡 — PlayMCP로 되는 것 / 안 되는 것 (2026-09-05 조사)
+
+| 능력 | 경로 | 가능 여부 | 근거·제약 |
+| --- | --- | --- | --- |
+| 나와의 채팅방에 보내기 | PlayMCP "카카오톡 나챗방" MCP | **가능** | 발송 제한·검수 없음(Kakao Developers). PlayMCP 예시 "방금 내용 내 카톡으로 보내줘"가 이것 |
+| 톡캘린더 조회·등록 | PlayMCP 톡캘린더 MCP | 가능 | 공식 발표 예시 "오늘 일정 알려줘" |
+| 카카오맵·선물하기·멜론 | PlayMCP 각 MCP | 가능 | 선물은 결제 동반 → approval 필수 |
+| 친구에게 보내기 | Kakao Developers 메시지 API (PlayMCP 도구 아님) | **사실상 불가** | 권한 신청·검수 필요, 일 30,000건·발신자당 100건·수신자 쌍당 20건, "자동 메시지는 지양, 검수 반려 가능". 비서 자동 발송 용도로 승인받기 어렵다 |
+| 채팅방 메시지 읽기(수신) | 없음 | **불가** | PlayMCP 카카오톡 도구는 발신 전용. 개인 카톡 수신 API는 존재하지 않는다 |
+| 채널(비즈니스) 알림톡·친구톡 | 카카오 비즈메시지 (유료·템플릿 사전 승인) | 가능(별도) | `apps/isenssign/src/lib/notifications/kakao-alimtalk.ts`가 이미 구현. PlayMCP와 무관 |
+| 카톡봇(사용자가 말 걸면 답하는 봇) | 카카오톡 채널 + 카카오 i 오픈빌더 챗봇 | **가능(별도 인프라)** | 아래 §카톡봇 |
+
+운영 주의(gpters 실전 가이드): PlayMCP의 OAuth/OTT 도구는 **"한 사람의 수동 개입"을 전제**로 설계돼 있어 봇이 100% 무인으로 진입한다고 가정하면 안 된다. 개인 OAuth로 끝나는 도구(나챗방)가 진입 장벽이 가장 낮고, 운영 봇에는 기존 채널을 대체하지 말고 얹으라는 조언.
+
+### 카톡봇 (카카오 i 오픈빌더) 메커니즘
+
+- 구성: 카카오톡 채널 개설 → 오픈빌더 신청(승인 약 3일) → 챗봇 생성 → 채널 연결 → 블록에 **스킬 서버**(HTTPS POST JSON 웹훅) 연결.
+- 제약: 스킬 응답 **5초 SLA**. AI 챗봇용 **콜백**을 켜면 요청에 1회용 `callbackUrl`이 오고 **1분 안에 1회** 최종 응답을 보낼 수 있다(`useCallback: true`).
+- 밀어내기 불가: 콜백 만료 후 봇이 먼저 말을 걸 수 없다. 뒤늦은 결과는 알림톡(유료·템플릿) 또는 **나에게 보내기**로 우회해야 한다.
+- 인증: 채널 챗봇은 채널을 추가한 누구나 말을 걸 수 있다. 사장님 전용으로 쓰려면 텔레그램 브리지와 같은 **페어링 코드** 게이트가 필요하다.
+- 공개 HTTPS 필요: 기존 `TUNNEL_URL`/`NGROK_URL` + P4 도메인 게이트(SSO 필수)가 이미 있다. 웹훅 경로는 SSO 예외 + 오픈빌더 서명/시크릿 검증으로 열어야 한다.
+
+### 우리 채널 구조 (현행)
+
+| 채널 | 방향 | 구현 | 비고 |
+| --- | --- | --- | --- |
+| 웹 대시보드 | 양방향 | `chat.ts` | 정본 표면 |
+| 텔레그램 | 양방향 + 승인 버튼 | `telegram.ts`(1,300줄) + `telegram-triage.ts` | long polling → 페어링 → rate limit → `enqueueInternal(prompt, "telegram:<chatId>")`. 트리아지: Gemini Flash로 단순 대화 선처리, 나머지 마이크루 |
+| 디스코드 | 크루 라운지 | `discord.ts` | 에이전트 간 대화 표시 |
+| 음성 | 양방향 | `routes/voice.ts` | `/api/chat`과 위임 경로 공유 |
+| 카카오톡 | **읽기 전용·수동** | spf-comms `kakao-inbox/` 내보내기 .txt 인제스트 | 발신 금지 하드 룰 |
+| 알림톡 | 발신(앱 전용) | isenssign | 비즈메시지 키 필요 |
+
+관찰: 양방향 채널 계약(페어링·rate limit·인젝션 스포트라이트·source 태그·회신 마커·승인 버튼)이 `telegram.ts` 한 파일 안에만 암묵적으로 존재한다. 카톡봇을 붙이려면 이 계약을 꺼내야 두 번째 구현이 복제가 아니라 재사용이 된다.
+
 ## Resources
 
 ### 문서
@@ -44,6 +79,12 @@
 - [PlayMCP 툴박스](https://playmcp.kakao.com/toolbox)
 - [외부 에이전트 연결 가이드](https://playmcp.kakao.com/llms/mcp-connection-guide.md)
 - [Kakao Adds 'Toolbox' Feature to PlayMCP](https://www.kakaocorp.com/page/detail/11865?lang=ENG)
+- [PlayMCP 오픈클로 연동 (카카오 서비스 목록·200여 MCP)](https://www.kakaocorp.com/page/detail/12012)
+- [카카오톡 메시지 API 이해하기 (나에게/친구에게 보내기·쿼터)](https://developers.kakao.com/docs/latest/ko/kakaotalk-message/common)
+- [친구 API·메시지 API 체크리스트 (자동 메시지 지양·검수)](https://devtalk.kakao.com/t/api-api/116052)
+- [운영 봇에 PlayMCP를 얹는 1단계 (OAuth 수동 개입 전제)](https://www.gpters.org/mcp-43q62kh1/post/step-1-installing-playmcp-oA7czlywADYN6fZ)
+- [오픈빌더 스킬 서버 (블록에 스킬 적용)](https://i.kakao.com/docs/skill-block)
+- [AI 챗봇 콜백 개발 가이드 (5초 SLA·callbackUrl 1분)](https://kakaobusiness.gitbook.io/main/tool/chatbot/skill_guide/ai_chatbot_callback_guide)
 
 ### 코드 참조
 
@@ -70,6 +111,10 @@
 | 시크릿은 `${ENV}` 플레이스홀더 + spawn 시 치환 | 레지스트리 파일(gitignore이지만 백업·역싱크 대상)에 토큰 실값을 남기지 않음. 치환 실패는 fail-closed |
 | 첫 직원은 daily-concierge 1명 | PlayMCP 예시 시나리오와 1:1, `morning-brief` 템플릿·`draft_only` 관례 재활용. market-scout는 수요 확인 후 |
 | 카톡 발송은 첫 주 `draft_only` | 원격 MCP 반환 본문의 인젝션 위험·OTT 만료 동작이 미검증. 승인카드 모드는 그 다음 |
+| 카카오톡 발신은 "나에게 보내기"만 목표로 한다 | 친구에게 보내기는 검수·쿼터·자동 메시지 반려로 비서 용도에 부적합. 제3자 발신은 알림톡(템플릿·유료)이 정식 경로 |
+| 정기 알림 발송은 MCP가 아니라 서버측 REST(나에게 보내기 + refresh token)로 | OTT/OAuth 도구는 사람의 재인증을 전제하므로 08:40 루프가 조용히 실패한다. 에이전트가 즉석에서 보내는 건은 MCP(승인), 루프 결과 배달은 서버 notify 경로 |
+| 카톡봇은 직원이 아니라 **채널 어댑터**(텔레그램·음성과 동형) | 봇은 마이크루의 입출력 표면이다. 처리·위임·라우팅은 기존 경로 그대로 |
+| 카톡봇 착수 전 `telegram.ts`에서 채널 계약을 추출한다 | 두 번째 양방향 채널을 복제로 만들면 페어링·인젝션·승인 규칙이 드리프트한다 |
 | 자동 등재 meta.json에 `mcpServers` 필드를 추가하지 않음 | 할당 정본은 `history/agents.json`(manage_mcp)이라 이중 정본이 생김. 씨앗 문서에는 "권장 할당"을 주석으로만 둔다 |
 
 ## Issues Encountered
