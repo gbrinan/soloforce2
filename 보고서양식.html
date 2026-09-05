@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{기업명}} 1페이지 브리핑</title>
+<style>
+  :root { --navy:#00857c; --ink:#1e2a32; --line:#dde3ec; --panel:#eef6f5; --up:#1a7f4b; --down:#c0392b; --gold:#a68a5b; --highlight:#fdf1de; --highlight-border:#e8c98a; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; color:var(--ink); background:#fff;
+         max-width:900px; margin:0 auto; padding:32px 28px; line-height:1.6; font-size:16px; }
+  header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-bottom:2px solid var(--navy); padding-bottom:12px; }
+  h1 { font-size:2rem; color:var(--navy); line-height:1.2; }
+  .sub { color:#667; font-size:.95rem; margin-top:4px; }
+  .tag { background:var(--navy); color:#fff; font-size:.8rem; font-weight:700; padding:4px 10px; border-radius:4px; white-space:nowrap; }
+  .meta { text-align:right; color:#667; font-size:.9rem; }
+  .kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin:18px 0; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi.focus { background:var(--highlight); border:1.5px solid var(--highlight-border); }
+  .kpi .l { color:#667; font-size:.82rem; }
+  .kpi.focus .l { color:#7a5b1e; font-weight:700; }
+  .kpi .v { color:var(--navy); font-weight:800; font-size:1.2rem; margin:2px 0; }
+  .kpi .d { color:#667; font-size:.82rem; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .chart { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:18px; }
+  .chart .t { font-weight:700; color:var(--navy); font-size:1rem; display:flex; justify-content:space-between; }
+  .chart .t span { color:#667; font-weight:400; font-size:.85rem; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+  h2 { font-size:1.1rem; color:var(--navy); border-left:4px solid var(--navy); padding-left:10px; margin:18px 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:.96rem; }
+  th, td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:left; }
+  th { color:#667; font-weight:600; background:var(--panel); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  ul { padding-left:16px; font-size:.96rem; }
+  li { margin-bottom:5px; }
+  .date { color:#889; font-size:.85rem; margin-right:6px; }
+  .src { color:#889; font-size:.82rem; }
+  .topics { background:#fdf7ea; border:1px solid #f0dfb5; border-radius:8px; padding:12px 16px; }
+  .topics h2 { border-left-color:var(--gold); color:#7a5b1e; margin-top:0; }
+  .topics ol { padding-left:18px; font-size:.96rem; }
+  footer { margin-top:22px; padding-top:10px; border-top:1px solid var(--line); color:#889; font-size:.82rem; }
+  @media print { body { padding:0; } .kpis { grid-template-columns:repeat(6,1fr); } }
+  @media (max-width:640px) { .kpis { grid-template-columns:repeat(2,1fr); } .grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>{{기업명}} <small style="font-size:.6em;color:#667">({{영문명}})</small></h1>
+      <div class="sub">{{시장}} {{종목코드}} · {{업종}} · 대표 {{대표자}} · 설립 {{설립}} · 본사 {{본사}}</div>
+    </div>
+    <div class="meta">
+      <div class="tag">1-PAGE BRIEFING</div>
+      <div style="margin-top:6px">{{용도: 예) 미팅 참고자료}}</div>
+      <div>작성일 {{작성일}} · 자료: OpenDART, 한국 주식 정보, 네이버 검색</div>
+    </div>
+  </header>
+
+  <section class="kpis">
+    <div class="kpi"><div class="l">현재가 ({{조회시각}})</div><div class="v">{{현재가}}</div><div class="d up">{{전일 대비}}</div></div>
+    <div class="kpi"><div class="l">시가총액</div><div class="v">{{시가총액}}</div><div class="d">{{시장·업종}}</div></div>
+    <div class="kpi focus"><div class="l">거래량 ★</div><div class="v">{{거래량}}</div><div class="d">{{전일 대비 거래량}}</div></div>
+    <div class="kpi"><div class="l">PER / PBR</div><div class="v">{{PER}} / {{PBR}}</div><div class="d">{{해석 한 줄}}</div></div>
+    <div class="kpi focus"><div class="l">부채비율 ★</div><div class="v">{{부채비율}}</div><div class="d">{{전기 대비 증감}}</div></div>
+    <div class="kpi focus"><div class="l">최대주주 지분율 ★</div><div class="v">{{지분율}}</div><div class="d">{{최대주주명}}</div></div>
+  </section>
+
+  <section class="chart">
+    <div class="t">일별 종가 추이 ({{기간}}) <span>최고 {{기간 최고}} · 최저 {{기간 최저}}</span></div>
+    <div>{{종가 추이 — 표 또는 간단한 SVG 선그래프. 도구로 받은 일별 종가만 사용}}</div>
+  </section>
+
+  <div class="grid">
+    <div>
+      <h2>최근 실적 — 연결기준 ({{보고서 기준: 예) 2026년 반기, 접수일}})</h2>
+      <table>
+        <tr><th>구분</th><th>{{당기}}</th><th>{{전년 동기}}</th><th>증감률</th></tr>
+        <tr><td>{{항목 1: 예) 순이자이익}}</td><td class="num">{{값}}</td><td class="num">{{값}}</td><td class="num up">{{+x.x%}}</td></tr>
+        <tr><td>{{항목 2}}</td><td class="num">{{값}}</td><td class="num">{{값}}</td><td class="num">{{증감}}</td></tr>
+        <tr><td>{{항목 3}}</td><td class="num">{{값}}</td><td class="num">{{값}}</td><td class="num">{{증감}}</td></tr>
+        <tr><td>{{항목 4}}</td><td class="num">{{값}}</td><td class="num">{{값}}</td><td class="num">{{증감}}</td></tr>
+      </table>
+      <div class="src">(출처: OpenDART)</div>
+
+      <h2>재무상태 ({{기준일}}, 연결)</h2>
+      <table>
+        <tr><th>구분</th><th>금액</th><th>구분</th><th>값</th></tr>
+        <tr><td>자산총계</td><td class="num">{{값}}</td><td>ROE</td><td class="num">{{값}}</td></tr>
+        <tr><td>부채총계</td><td class="num">{{값}}</td><td>부채비율</td><td class="num">{{값}}</td></tr>
+        <tr><td>자본총계</td><td class="num">{{값}}</td><td>전기말 대비 자산증가율</td><td class="num">{{값}}</td></tr>
+      </table>
+      <div class="src">(출처: OpenDART)</div>
+
+      <h2>최근 공시 (DART)</h2>
+      <ul>
+        <li><span class="date">{{날짜}}</span>{{공시 1}}</li>
+        <li><span class="date">{{날짜}}</span>{{공시 2}}</li>
+        <li><span class="date">{{날짜}}</span>{{공시 3}}</li>
+        <li><span class="date">{{날짜}}</span>{{공시 4}}</li>
+      </ul>
+      <div class="src">(출처: OpenDART)</div>
+    </div>
+
+    <div>
+      <h2>최근 뉴스 · 이슈 ({{기준일}})</h2>
+      <ul>
+        <li><span class="date">{{날짜}}</span>{{뉴스 1 — 제목과 한 줄 의미}}</li>
+        <li><span class="date">{{날짜}}</span>{{뉴스 2}}</li>
+        <li><span class="date">{{날짜}}</span>{{뉴스 3}}</li>
+        <li><span class="date">{{날짜}}</span>{{뉴스 4}}</li>
+      </ul>
+      <div class="src">(출처: 네이버 검색)</div>
+
+      <h2>주요 주주 현황 ({{기준일}})</h2>
+      <table>
+        <tr><td>{{최대주주}} (최대주주)</td><td class="num">{{지분율}}</td></tr>
+        <tr><td>{{주주 2 또는 변동 사항}}</td><td class="num">{{값}}</td></tr>
+        <tr><td>{{지배구조 특징 — 예) 분산 소유, 전문경영인 체제}}</td><td class="num">{{-}}</td></tr>
+      </table>
+      <div class="src">(출처: OpenDART)</div>
+
+      <div class="topics" style="margin-top:18px">
+        <h2>미팅 체크포인트 제안</h2>
+        <ol>
+          <li>{{질문 1 — 부채비율·유동성 등 재무건전성 이슈}}</li>
+          <li>{{질문 2 — 최대주주 지분 변동 및 지배구조 리스크}}</li>
+          <li>{{질문 3 — 최근 거래량·수급 변화의 배경}}</li>
+          <li>{{질문 4 — 주가 변동성 요인}}</li>
+          <li>{{질문 5 — 신용등급·차입 구조 등 자본정책}}</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <footer>자료 출처: OpenDART({{접수 문서}}) · 한국 주식 정보({{조회 시각}} 기준) · 네이버 검색({{조회일}}). 도구로 조회하지 못한 값은 "조회 불가"로 표기했습니다. 투자 판단의 근거로 사용하지 마세요.</footer>
+</body>
+</html>
