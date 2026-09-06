@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ConnectionIdSchema } from "./reversible-ingest-schema.js";
 import { atomicWriteFileSync } from "./utils/atomic-write.js";
@@ -77,6 +77,11 @@ export class GoogleConnectionRegistry {
     if (!parsedId.success) return null;
     const path = this.#connectionPath(parsedId.data);
     return existsSync(path) ? GoogleConnectionSchema.parse(readJson(path)) : null;
+  }
+
+  listConnections(): GoogleConnection[] {
+    return readdirSync(this.#connectionDirectory()).filter(name => name.endsWith('.json'))
+      .flatMap(name => { const connection = this.getConnection(name.slice(0, -5)); return connection ? [connection] : []; });
   }
 
   revokeConnection(untrustedConnectionId: string): GoogleConnection | null {

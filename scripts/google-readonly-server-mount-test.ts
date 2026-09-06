@@ -18,7 +18,7 @@ class ServerMountProvider implements GoogleReadonlyProvider {
     return {
       accessToken: "server-access-token",
       refreshToken: "server-refresh-token",
-      grantedScopes: ["openid", "email", "https://www.googleapis.com/auth/drive.metadata.readonly"],
+      grantedScopes: ["openid", "email", "https://www.googleapis.com/auth/drive.readonly"],
     };
   }
 
@@ -40,6 +40,7 @@ const projectsDirectory = join(runtimeRoot, "projects");
 const projectId = "education/client-alpha";
 mkdirSync(join(projectsDirectory, "education", "client-alpha"), { recursive: true });
 const connector = createGoogleReadonlyServerRoutes({
+  resolveRemoteAddress: () => "127.0.0.1",
   env: {
     GOOGLE_DRIVE_CONNECTOR_CLIENT_ID: "connector-client-id",
     GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET: "connector-client-secret",
@@ -89,6 +90,7 @@ try {
   if (typeof connectionId !== "string") throw new TypeError("Expected server connection ID string");
   assert.equal((await connector.request(`http://localhost/oauth/callback?state=${state}&code=server-code`)).status, 400);
   const wrongKeyConnector = createGoogleReadonlyServerRoutes({
+  resolveRemoteAddress: () => "127.0.0.1",
     env: {
       GOOGLE_DRIVE_CONNECTOR_CLIENT_ID: "connector-client-id",
       GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET: "connector-client-secret",
@@ -114,6 +116,7 @@ try {
 
   // Given: the same configured project is exposed on a non-loopback origin without SSO.
   const externalConnector = createGoogleReadonlyServerRoutes({
+  resolveRemoteAddress: () => "127.0.0.1",
     env: {
       GOOGLE_DRIVE_CONNECTOR_CLIENT_ID: "connector-client-id",
       GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET: "connector-client-secret",

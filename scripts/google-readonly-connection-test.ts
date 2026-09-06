@@ -10,7 +10,7 @@ import { GoogleReadonlyHttpProvider } from "../src/server/google-readonly-provid
 import { OAuthTransactionSchema } from "../src/server/google-readonly-schema.js";
 import { GoogleReadonlyConnectionService } from "../src/server/google-readonly-service.js";
 
-const REQUIRED_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly";
+const REQUIRED_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const projectRoot = mkdtempSync(join(tmpdir(), "soloforce-google-readonly-"));
 const providerApp = new Hono();
 let currentTime = "2026-08-24T04:00:00.000Z";

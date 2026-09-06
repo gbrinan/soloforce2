@@ -1,8 +1,122 @@
 # My Crew — Windows 설치 안내서
 
-> **문서 역할**: Windows(WSL2) 환경 첫 설치 안내서 (비개발자 포함). 사용법은 [README-USER.md](README-USER.md), 개발·운영 정보는 [README.md](README.md).
+> **문서 역할**: Windows 기존 설치의 Git 업데이트·환경 설정 이전과 WSL2 첫 설치 안내서. 사용법은 [README-USER.md](README-USER.md), 개발·운영 정보는 [README.md](README.md).
 
-> 버전: 1.0 | 작성: 2026-06-05 | 대상: Windows 사용자 (비개발자 포함)
+> 작성: 2026-06-05 | Git 업데이트·자료 수집 안내 추가: 2026-09-06 | 대상: Windows 사용자
+
+---
+
+<a id="update-existing"></a>
+
+## 기존 설치: Git 업데이트와 Mac의 .env 이전
+
+이미 Soloforce2가 실행되는 Windows PC라면 이 절차를 사용합니다. 먼저 런처와 실행 프로세스에서 실제 소스 폴더와 Windows Node / WSL 여부를 확인하고 기존 방식을 유지하세요. 아래 첫 설치 스크립트를 업데이트 용도로 다시 실행할 필요는 없습니다.
+
+`git pull`은 원격 저장소의 변경을 내려받습니다. Mac에서 수정만 하고 아직 원격에 올리지 않은 코드는 받을 수 없습니다. 업데이트할 변경이 `gbrinan/soloforce2`의 `main`에 반영되었는지 먼저 확인하세요. `.git`이 없는 배포본은 Git 체크아웃이 아니므로 이 명령을 적용할 수 없습니다.
+
+### 1. 기존 설정과 자료 보존
+
+- 앱에서 진행 중인 작업을 마치고 해당 앱 서버를 정상 종료합니다. 다른 Node 프로세스는 종료하지 않습니다.
+- 현재 `.env`와 개인 자료를 저장소 밖 비공개 로컬 폴더에 백업합니다. 자료 위치는 기본 `history/`이며 `MYCREW_HOME`을 설정했다면 그 아래 `history/`입니다. `WORKSPACE_ROOT` 아래 업무 프로젝트도 보존합니다.
+- `git status --short`에 변경이 있으면 먼저 내용을 확인하고 이번 업데이트와 병합합니다. `git reset --hard`, `git clean`으로 해결하지 않습니다.
+- 자료 수집 기능은 **Node 24 사용을 권장**하며 Mac의 24.14.0에서 검증했습니다. Windows의 실제 실행은 아래 검사로 확인합니다. Mac의 `node_modules`를 복사하지 않고 실행 환경에서 설치합니다.
+
+### 2. PowerShell에서 코드 받기
+
+아래 경로는 예시입니다. `package.json`이 있는 실제 폴더로 바꿉니다. 이 예시는 `origin`이 `gbrinan/soloforce2`이고 현재 브랜치가 `main`인 설치를 대상으로 합니다. 다른 브랜치나 미커밋 변경이 있으면 Codex가 상태를 확인한 뒤 적용하도록 합니다.
+
+```powershell
+$Repo = 'C:\Soloforce2\repo' # 실제 실행 소스 폴더로 변경
+Set-Location -LiteralPath $Repo -ErrorAction Stop
+
+node --version
+git remote -v
+git status --short --branch
+
+$Branch = git branch --show-current
+if ($LASTEXITCODE -ne 0 -or $Branch -ne 'main') { throw 'Git 저장소와 현재 브랜치를 확인하세요.' }
+$Changes = git status --porcelain
+if ($LASTEXITCODE -ne 0 -or $Changes) { throw '기존 변경을 확인하고 보존·병합한 뒤 업데이트하세요.' }
+
+git pull --ff-only origin main
+if ($LASTEXITCODE -ne 0) { throw '업데이트 실패: 분기 차이나 충돌을 확인하세요.' }
+git log -1 --oneline
+```
+
+`Already up to date`는 현재 브랜치에 내려받을 커밋이 없다는 뜻입니다. 원하는 기능의 배포·인증·실행 성공을 의미하지 않습니다. Git에 올리지 않은 Mac 변경은 별도로 원격 반영이 필요합니다.
+
+### 3. Mac에서 작성한 .env 적용
+
+`.env`는 Git으로 옮기지 않습니다. 사용자가 별도로 옮긴 파일을 실행 소스 루트의 `package.json` 옆에 둡니다. Windows에 기존 파일이 있으면 기존 경로·키를 유지하고 새 연결 설정을 병합합니다. Codex에는 파일 위치를 알려주면 되며 비밀 값을 채팅에 붙여넣지 않습니다.
+
+| 항목 | Windows에서 확인할 내용 |
+|---|---|
+| `WORKSPACE_ROOT`, `MYCREW_HOME`, `CLAUDE_PATH` | Mac의 `/Users/...` 경로를 실제 Windows 실행 경로로 변경. WSL로 실행하면 Linux/WSL 경로 사용 |
+| `PROJECTS_FOLDER` | 기존 폴더명 보존. `PROJECTS_DIR`은 `WORKSPACE_ROOT`와 이 폴더명을 합친 경로 |
+| `GOOGLE_DRIVE_CONNECTOR_PROJECT_ID` | Google Cloud 프로젝트 ID가 아닌 `PROJECTS_DIR` 아래 실제 프로젝트의 최대 2단 상대 경로. 필요한 폴더가 존재하는지 확인 |
+| Drive Client ID/secret, `SOLOFORCE_CONNECTION_ENCRYPTION_KEY` | 전달된 값을 사용. 기존 토큰이 있으면 복호화에 사용한 키를 유지 |
+| `NOTION_ACCESS_TOKEN` | 읽을 페이지에 연결을 추가한 Notion 내부 연결 토큰 |
+| `CORPUS_EMBED_MODEL`, `CORPUS_EMBED_URL` | 선택 항목. 실제 실행 환경에서 접근 가능한 로컬 모델·주소를 준비한 경우만 설정 |
+
+현재 `.env` 로더는 바깥 따옴표를 제거하거나 `${다른_변수}`를 확장하지 않습니다. `KEY=value` 형식으로 실제 값을 적고, 같은 키가 프로세스 환경변수에 있으면 그 값이 우선한다는 점도 확인합니다. 경로·필수 키의 존재 여부만 점검하고 값 전체를 출력하지 않습니다.
+
+기본 포트 3456과 Windows 브라우저 `http://localhost:3456`을 사용한다면 콜백은 다음과 같습니다. 포트가 다르면 함께 변경하고 Google OAuth 클라이언트의 승인된 리디렉션 URI에도 정확히 등록합니다.
+
+- Drive 자료 연결: `http://localhost:3456/api/connections/google-drive/oauth/callback`
+- 앱 Google 로그인 사용 시: `http://localhost:3456/auth/google/callback`
+
+`localhost`와 `127.0.0.1`을 섞지 않습니다. [Drive·Notion 계정 설정 및 처리 범위](config/corpus/README.md)를 확인하고, 실제 로그인·권한 동의·약관 동의는 사용자가 진행합니다.
+
+### 4. 설치·검증·실행
+
+같은 소스 폴더의 PowerShell에서 실행합니다. `npm.cmd`를 사용하므로 `npm.ps1` 실행을 위해 시스템 실행 정책을 바꿀 필요가 없습니다. `npm ci`는 기존 `node_modules`를 재설치하므로 서버가 종료된 상태에서 진행합니다.
+
+```powershell
+npm.cmd ci
+if ($LASTEXITCODE -ne 0) { throw '의존성 설치 실패' }
+npm.cmd run build
+if ($LASTEXITCODE -ne 0) { throw '빌드 실패' }
+npm.cmd run test:corpus
+if ($LASTEXITCODE -ne 0) { throw '자료 수집 테스트 실패' }
+npm.cmd run test:google-readonly-connection
+if ($LASTEXITCODE -ne 0) { throw 'Drive 회귀 테스트 실패' }
+npm.cmd start
+```
+
+`better-sqlite3` 네이티브 바인딩 오류가 실제로 발생하면 같은 Node 환경에서 `npm.cmd rebuild better-sqlite3` 후 실패한 검사를 다시 실행합니다. 런처가 이미 실행 중인 서버를 재사용할 수 있으므로 `.env` 변경 후에는 실제 서버 프로세스가 재시작되었는지 확인합니다.
+
+서버가 실행된 상태에서 별도 PowerShell 창으로 확인합니다. 포트를 변경했다면 주소도 변경합니다.
+
+```powershell
+Invoke-RestMethod 'http://localhost:3456/api/health'
+Invoke-RestMethod 'http://localhost:3456/api/connections/google-drive/status'
+Invoke-RestMethod 'http://localhost:3456/api/corpus/status'
+Start-Process 'http://localhost:3456'
+```
+
+401/403 응답은 로그인 상태를 확인하고 인증된 브라우저에서 다시 점검합니다. 인증을 끄거나 서버를 외부에 공개할 필요는 없습니다. `configured: true`만으로 실제 클라우드 계정 연결 성공을 판단하지 않습니다. 설정 → 데이터에서 가상 문서를 등록해 분류·검색·백업을 확인한 뒤, 사용자가 선택한 Drive 파일·Notion 페이지로 실제 연결을 검증합니다. OCR·전사는 필요 상태로 분기하며 변환 엔진은 포함하지 않습니다. 벡터 검색은 별도 로컬 모델을 준비했을 때만 검증합니다.
+
+WSL 설치는 Ubuntu 터미널의 실제 소스 폴더에서 Git 업데이트, `.env` 병합, 설치·빌드·테스트·실행 순서로 진행합니다. `npm.cmd` 대신 `npm`을 사용하고 각 명령이 성공한 뒤 다음으로 진행하세요. Windows Node의 `node_modules`와 혼용하지 않습니다.
+
+### Windows Codex에 요청하기
+
+아래 문구에 실제 `.env` 위치를 넣어 기존 프로젝트를 연 Codex에 전달합니다.
+
+```text
+이 Windows PC의 Soloforce2를 Git으로 업데이트하고 실행까지 확인해줘.
+README-WINDOWS.md의 '기존 설치: Git 업데이트와 Mac의 .env 이전'과
+config/corpus/README.md를 기준으로 진행해줘.
+Mac에서 옮긴 .env 위치: [실제 Windows 파일 경로]
+실제 실행 소스 폴더와 Windows Node/WSL 방식을 먼저 확인하고 유지해줘.
+기존 코드 변경·.env·개인 자료를 보존하고, 원격과 브랜치를 확인한 뒤
+git pull --ff-only로 업데이트해줘. 충돌이나 분기 차이는 원인을 확인해 해결해줘.
+필요한 .env 항목과 경로만 병합하고 비밀 값은 출력·커밋·업로드하지 마.
+Node 24 환경에서 의존성 설치, build, test:corpus,
+test:google-readonly-connection을 실행하고 실제 서버를 재시작해줘.
+health·설정 화면·가상 문서 등록/분류/검색/백업까지 확인해줘.
+Google 로그인·권한·약관 동의는 내가 진행할 화면을 알려줘.
+실행 폴더, 적용 커밋, 테스트 결과, 접속 URL, 남은 사용자 동작을 보고해줘.
+```
 
 ---
 

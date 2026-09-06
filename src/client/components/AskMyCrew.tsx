@@ -8,11 +8,12 @@ import { useT } from '../i18n/I18nProvider';
 // 답변은 /api/ai/ask SSE 스트리밍(P0-②)으로 실시간 표시된다.
 
 interface AskSource {
-  source: 'library' | 'wiki';
+  source: 'library' | 'wiki' | 'corpus';
   title: string;
   snippet: string;
   base?: string;
   relpath?: string;
+  locator?: string;
 }
 
 interface Props {
@@ -135,9 +136,9 @@ export default function AskMyCrew({ opened, onClose }: Props) {
             {sources.map((s, i) => (
               <Group key={i} gap={6} wrap="nowrap">
                 {s.source === 'library' ? <IconFileText size={13} /> : <IconBook2 size={13} />}
-                <Text size="xs" truncate style={{ flex: 1 }} title={s.relpath ?? s.title}>{s.title}</Text>
+                <Text size="xs" truncate style={{ flex: 1 }} title={s.locator ?? s.relpath ?? s.title}>{s.title}{s.locator ? ` · ${s.locator}` : ''}</Text>
                 <Badge size="xs" variant="outline" color="gray">
-                  {s.source === 'library' ? t('ask.sourceLibrary') : t('ask.sourceWiki')}
+                  {s.source === 'corpus' ? '등록 자료' : s.source === 'library' ? t('ask.sourceLibrary') : t('ask.sourceWiki')}
                 </Badge>
               </Group>
             ))}

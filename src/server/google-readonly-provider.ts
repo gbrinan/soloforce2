@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import ky, { type KyInstance } from "ky";
+import { CorpusError, MAX_SOURCE_BYTES } from './corpus/extract.js';
+import { readBounded } from './corpus/notion.js';
 import {
   GoogleDriveFileListSchema,
   GoogleTokenResponseSchema,
@@ -37,6 +39,11 @@ export interface GoogleReadonlyProvider {
   exchangeAuthorizationCode(input: { readonly code: string; readonly codeVerifier: string }): Promise<AuthorizationTokens>;
   fetchIdentity(accessToken: string): Promise<GoogleIdentity>;
   listMetadata(refreshToken: string): Promise<readonly GoogleDriveFile[]>;
+  readFile?(refreshToken: string, fileId: string): Promise<GoogleFileContent>;
+}
+
+export interface GoogleFileContent {
+  id: string; name: string; mime: string; bytes: Buffer; revision: string; exported: boolean;
 }
 
 export class GoogleProviderError extends Error {
@@ -167,6 +174,42 @@ export class GoogleReadonlyHttpProvider implements GoogleReadonlyProvider {
       return GoogleTokenResponseSchema.parse(untrusted).access_token;
     } catch (error) {
       throw new GoogleProviderError("token_refresh", { cause: error });
+    }
+  }
+
+  async readFile(refreshToken: string, fileId: string): Promise<GoogleFileContent> {
+    if (!/^[a-zA-Z0-9_-]{1,200}$/.test(fileId)) throw new CorpusError('invalid_drive_file_id', 400);
+    const accessToken = await this.#refreshAccessToken(refreshToken);
+    const url = `${this.#options.driveFilesEndpoint}/${encodeURIComponent(fileId)}`;
+    const headers = { authorization: `Bearer ${accessToken}` };
+    type Metadata = { id: string; name: string; mimeType: string; version: string; size?: string; md5Checksum?: string; trashed?: boolean; capabilities?: { canDownload?: boolean } };
+    const metadata = async (): Promise<Metadata> => {
+      const response = await this.#http.get(url, { headers, searchParams: { fields: 'id,name,mimeType,version,size,md5Checksum,trashed,capabilities(canDownload)', supportsAllDrives: 'true' } });
+      const file = await response.json<Metadata>();
+      if (file.id !== fileId || !file.name || !file.mimeType || !file.version) throw new CorpusError('invalid_drive_metadata', 502);
+      if (file.trashed || file.capabilities?.canDownload !== true) throw new CorpusError('drive_download_forbidden', 403);
+      if (Number(file.size) > MAX_SOURCE_BYTES) throw new CorpusError('file_too_large', 413);
+      return file;
+    };
+    try {
+      const before = await metadata();
+      const formats: Record<string, { mime: string; ext: string }> = {
+        'application/vnd.google-apps.document': { mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ext: '.docx' },
+        'application/vnd.google-apps.spreadsheet': { mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: '.xlsx' },
+        'application/vnd.google-apps.presentation': { mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ext: '.pptx' },
+      };
+      const format = formats[before.mimeType];
+      if (before.mimeType.startsWith('application/vnd.google-apps.') && !format) throw new CorpusError('unsupported_drive_native_type', 422);
+      const response = await this.#http.get(format ? `${url}/export` : url, { headers,
+        searchParams: format ? { mimeType: format.mime } : { alt: 'media', supportsAllDrives: 'true' } });
+      const bytes = await readBounded(response, format ? 10 * 1024 * 1024 : MAX_SOURCE_BYTES);
+      const after = await metadata();
+      if (before.version !== after.version || before.mimeType !== after.mimeType) throw new CorpusError('source_changed_retry', 409);
+      if (!format && before.md5Checksum && createHash('md5').update(bytes).digest('hex') !== before.md5Checksum) throw new CorpusError('drive_checksum_mismatch', 409);
+      return { id: fileId, name: `${before.name}${format && !before.name.endsWith(format.ext) ? format.ext : ''}`, mime: format?.mime ?? before.mimeType, bytes, revision: before.version, exported: Boolean(format) };
+    } catch (error) {
+      if (error instanceof CorpusError) throw error;
+      throw new CorpusError('drive_content_fetch_failed', 502);
     }
   }
 }

@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Hono, type Context } from "hono";
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { z } from "zod";
 import { HISTORY_DIR, PROJECTS_DIR } from "../config.js";
 import { getCurrentSession, isSsoEnabled } from "./auth-google.js";
@@ -14,6 +15,8 @@ import {
 import { createGoogleReadonlyRoutes } from "./google-readonly-routes.js";
 import { GoogleReadonlyConnectionService } from "./google-readonly-service.js";
 import { OwnerPrincipalStore } from "./owner-principal-store.js";
+import { getCorpusService, registerCorpusDriveAccess } from './corpus/runtime.js';
+import type { CorpusService } from './corpus/service.js';
 
 const CALLBACK_PATH = "/api/connections/google-drive/oauth/callback";
 const RECENT_AUTH_MS = 15 * 60 * 1000;
@@ -46,6 +49,8 @@ const ConnectorConfigSchema = z.object({
 }).strict();
 
 type ServerRouteOptions = {
+  readonly corpus?: CorpusService;
+  readonly resolveRemoteAddress?: (context: Context) => string | undefined;
   readonly env: NodeJS.ProcessEnv;
   readonly storage: {
     readonly historyDirectory: string;
@@ -56,6 +61,7 @@ type ServerRouteOptions = {
 };
 
 type CredentialResolverOptions = {
+  readonly resolveRemoteAddress: (context: Context) => string | undefined;
   readonly registry: GoogleConnectionRegistry;
   readonly trustedOrigin: string;
   readonly localOwnerAllowed: boolean;
@@ -98,12 +104,14 @@ export function createGoogleReadonlyServerRoutes(options: ServerRouteOptions = p
     provider,
     now,
   });
+  if (options.corpus) registerCorpusDriveAccess(id => service.isConnectionActive(id));
   const ownerPrincipals = new OwnerPrincipalStore({
     historyDirectory: options.storage.historyDirectory,
     now,
   });
   const callback = new URL(config.data.callbackUrl);
   const credentialResolverOptions: CredentialResolverOptions = {
+    resolveRemoteAddress: options.resolveRemoteAddress ?? ((context) => { try { return getConnInfo(context).remote.address; } catch { return undefined; } }),
     registry,
     trustedOrigin: callback.origin,
     localOwnerAllowed: callback.hostname === "localhost" || callback.hostname === "127.0.0.1",
@@ -112,6 +120,7 @@ export function createGoogleReadonlyServerRoutes(options: ServerRouteOptions = p
 
   app.get("/status", (context) => context.json({ configured: true, projectId: config.data.projectId }));
   app.route("/", createGoogleReadonlyRoutes({
+    corpus: options.corpus,
     projectId: config.data.projectId,
     service,
     resolveCredential: (context) => resolveCredential(context, credentialResolverOptions),
@@ -122,6 +131,7 @@ export function createGoogleReadonlyServerRoutes(options: ServerRouteOptions = p
 
 function productionOptions(): ServerRouteOptions {
   return {
+    corpus: getCorpusService(),
     env: process.env,
     storage: { historyDirectory: HISTORY_DIR, projectsDirectory: PROJECTS_DIR },
   };
@@ -154,8 +164,10 @@ function resolveCredential(
       : { kind: "invalid" };
   }
   const csrfValid = context.req.header("Origin") === options.trustedOrigin;
+  if (context.req.header('Sec-Fetch-Site') === 'cross-site') return { kind: 'none' };
   if (!isSsoEnabled()) {
-    return options.localOwnerAllowed
+    return options.localOwnerAllowed && new URL(context.req.url).origin === options.trustedOrigin
+      && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(options.resolveRemoteAddress(context) ?? '')
       ? { kind: "owner", csrfValid, recentAuth: true }
       : { kind: "none" };
   }

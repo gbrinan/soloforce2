@@ -12,6 +12,7 @@ import StorePairingPanel from './StorePairingPanel';
 import ConfigEditorModal from './ConfigEditorModal';
 import { ServicePolicyPanel } from './ServicePolicyPanel';
 import ConsentSettingsPanel from './ConsentSettingsPanel';
+import CorpusPanel from './CorpusPanel';
 import {
   getLockSettings, saveLockSettings, clearLockCredential, saveCredential, LOCK_NOW_EVENT,
 } from '../Security/LockScreen';
@@ -649,6 +650,7 @@ function DataSection() {
   return (
     <Stack gap="md">
       <SectionHead title={t('settings.data')} desc={t('settings.data.desc')} />
+      <CorpusPanel />
       <SettingsCard>
         <Stack gap="xs">
           <FieldLabel>{t('settings.data.backupLabel')}</FieldLabel>

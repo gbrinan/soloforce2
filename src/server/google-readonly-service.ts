@@ -21,6 +21,7 @@ import {
 } from "./google-readonly-provider.js";
 import { ConnectionIdSchema, ProjectIdSchema, type IngestManifest, type OperationResult } from "./reversible-ingest-schema.js";
 import { ReversibleIngestStore } from "./reversible-ingest.js";
+import { CorpusError } from './corpus/extract.js';
 
 type ServiceOptions = {
   readonly projectRoot: string;
@@ -173,6 +174,42 @@ export class GoogleReadonlyConnectionService {
       if (error instanceof GoogleProviderError) return { kind: "denied", reason: "provider_failure" };
       throw error;
     }
+  }
+
+  isConnectionActive(connectionId: string): boolean {
+    const connection = this.#registry.getConnection(connectionId);
+    return connection?.projectId === this.#projectId && connection.state === 'active';
+  }
+
+  listConnections() {
+    return this.#registry.listConnections().filter(connection => connection.projectId === this.#projectId)
+      .map(({ connectionId, displayEmail, state }) => ({ connectionId, displayEmail, state }));
+  }
+
+  async listFiles(connectionId: string) {
+    const secret = this.contentCredential(connectionId);
+    const files = await this.#provider.listMetadata(secret.refreshToken);
+    if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403);
+    return files;
+  }
+
+  async readFile(connectionId: string, fileId: string) {
+    const secret = this.contentCredential(connectionId);
+    if (!this.#provider.readFile) throw new CorpusError('drive_content_not_supported', 503);
+    const file = await this.#provider.readFile(secret.refreshToken, fileId);
+    if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403);
+    return file;
+  }
+
+  private contentCredential(connectionId: string) {
+    if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403);
+    const connection = this.#registry.getConnection(connectionId)!;
+    try {
+      const secret = this.#broker.read(connection.credentialHandle);
+      if (!secret) throw new CorpusError('credential_unavailable', 403);
+      return secret;
+    }
+    catch { throw new CorpusError('credential_unavailable', 403); }
   }
 
   revokeConnection(untrustedConnectionId: string): void {

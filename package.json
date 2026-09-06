@@ -27,7 +27,8 @@
     "start:b": "cross-env MYCREW_HOME=./.mycrew-B PORT=3459 tsx src/index.ts",
     "test:two-instance": "tsx scripts/two-instance-integration-test.ts",
     "test:partner-request": "tsx scripts/two-instance-partner-request-test.ts",
-    "verify:app": "node scripts/verify-app-e2e.mjs"
+    "verify:app": "node scripts/verify-app-e2e.mjs",
+    "test:corpus": "node --import tsx scripts/corpus-test.ts && node --import tsx scripts/corpus-provider-test.ts && node --import tsx scripts/corpus-server-test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -110,7 +111,8 @@
     "ws": "^8.20.1",
     "yaml": "^2.9.0",
     "youtube-transcript": "^1.3.1",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "pdfjs-dist": "5.7.284"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

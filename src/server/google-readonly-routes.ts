@@ -14,8 +14,14 @@ import {
   type MetadataIngestResult,
 } from "./google-readonly-service.js";
 import { ConnectionIdSchema } from "./reversible-ingest-schema.js";
+import { z } from 'zod';
+import { bodyLimit } from 'hono/body-limit';
+import { CorpusError } from './corpus/extract.js';
+import type { CorpusService } from './corpus/service.js';
+import { CorpusLabelsSchema } from './corpus/routes.js';
 
 type RouteOptions = {
+  readonly corpus?: CorpusService;
   readonly projectId: string;
   readonly service: GoogleReadonlyConnectionService;
   readonly resolveCredential: (context: Context) => ConnectedIngestCredential | Promise<ConnectedIngestCredential>;
@@ -24,6 +30,25 @@ type RouteOptions = {
 
 export function createGoogleReadonlyRoutes(options: RouteOptions): Hono {
   const app = new Hono();
+  app.onError((error, c) => {
+    if (error instanceof CorpusError) return c.json({ error: error.code }, error.status);
+    if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'invalid_request' }, 400);
+    return c.json({ error: 'google_operation_failed' }, 502);
+  });
+  app.get('/connections', auth(options, () => ({ kind: 'owner_read' })), c => c.json({ connections: options.service.listConnections() }));
+  app.get('/:connectionId/files', auth(options, () => ({ kind: 'owner_read' })), async c =>
+    c.json({ files: await options.service.listFiles(c.req.param('connectionId')) }));
+  app.post('/:connectionId/import', auth(options, () => ({ kind: 'owner_mutation' })), bodyLimit({ maxSize: 8192 }), async c => {
+    if (!options.corpus) throw new CorpusError('corpus_not_configured', 503);
+    const body = z.object({ fileId: z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/), labels: CorpusLabelsSchema }).strict().parse(await c.req.json());
+    const connectionId = c.req.param('connectionId');
+    const file = await options.service.readFile(connectionId, body.fileId);
+    const source = await options.corpus.import({ provider: 'google-drive', externalId: file.id, connectionId,
+      name: file.name, mime: file.mime, bytes: file.bytes, providerRevision: file.revision, labels: body.labels,
+      sourceUrl: `https://drive.google.com/file/d/${file.id}/view`, backup: file.exported ? 'export' : 'original' },
+    () => options.service.isConnectionActive(connectionId));
+    return c.json({ source }, 201);
+  });
 
   app.post(
     "/oauth/start",
@@ -102,6 +127,9 @@ function auth(
 function completeResponse(c: Context, result: CompleteConnectionResult): Response {
   switch (result.kind) {
     case "connected":
+      if (c.req.header('Accept')?.includes('text/html')) {
+        return c.html('<!doctype html><html lang="ko"><meta charset="utf-8"><title>Drive 연결 완료</title><body><h1>Drive 연결을 완료했습니다.</h1><p>이 창을 닫고 Soloforce2 자료 화면에서 목록 새로고침을 누르세요.</p></body></html>', 201);
+      }
       return c.json({
         connection: {
           connectionId: result.connection.connectionId,

@@ -17,13 +17,14 @@ AI 에이전트 팀을 운영하는 개인 비서 시스템입니다.
 - **cron 스케줄**: cron 표현식으로 반복 스케줄을 관리합니다 (시간 트리거 실행은 외부 LaunchAgent — 아래 운영 정책 참조. 앱 내부 cron 데몬은 없음).
 - **승인 시스템**: 민감 작업에 대해 사장님 승인을 요청하며, 부재중 모드를 지원합니다.
 - **세션 리셋 시 대화 요약 주입**: 세션이 리셋될 때 오늘 대화 요약을 자동으로 프롬프트에 주입하여 맥락을 유지합니다.
+- **자료 수집·분류·검색**: Drive·Notion·로컬 자료의 형식을 먼저 확인하고 본문·표·OCR·전사 경로로 분기합니다. 원본·버전 백업, 키워드·업무 분류 연결 검색, 선택적 로컬 벡터 검색을 지원합니다. [설정과 처리 범위](config/corpus/README.md)
 
 ## 사전 요구사항
 
 - **지원 플랫폼**: macOS/Linux 우선 (시간 트리거는 macOS LaunchAgent 기준). Windows는 WSL2로 [README-WINDOWS.md](README-WINDOWS.md) 참조
 - **Claude 계정**: Claude Code CLI 로그인 필요 (구독/사용량 과금은 본인 계정 기준)
 
-- **Node.js** 20 LTS 이상 (정본: `package.json`의 `engines.node`)
+- **Node.js 24 사용 권장**: 자료 수집 기능은 24.14.0에서 검증했습니다. `package.json`의 기존 `engines.node`는 `>=20`이지만, PDF 추출 의존성의 요구 버전은 Node 22.13 이상 또는 24 이상이므로 Node 20으로 이 기능을 실행하지 마세요.
 - **Claude Code CLI** (`claude` 명령어가 PATH에 있어야 합니다)
   - 설치: https://docs.anthropic.com/en/docs/claude-code
   - 설치 후 `claude --version`으로 확인
@@ -33,9 +34,11 @@ AI 에이전트 팀을 운영하는 개인 비서 시스템입니다.
 ```bash
 git clone https://github.com/gbrinan/soloforce2
 cd soloforce2
-npm install
-# 빌드는 불필요 — start가 tsx로 소스를 직접 실행합니다
+npm ci
+npm run build
 ```
+
+서버는 `tsx`로 소스를 실행하지만, 웹 화면은 빌드 결과를 사용하므로 설치·업데이트 후 `npm run build`를 실행합니다. 기존 Windows 설치의 Git 업데이트와 Mac에서 작성한 `.env` 이전은 [Windows 업데이트 절차](README-WINDOWS.md#update-existing)를 따르세요. 실제 설치 폴더에서 작업하며, `.env`와 개인 데이터는 Git으로 옮기지 않습니다.
 
 ## 설정
 
@@ -47,6 +50,8 @@ cp .env.example .env
 
 필요에 따라 값을 수정합니다. 기본값이 있으므로 대부분의 경우 `.env` 없이도 동작합니다.
 
+이미 `.env`가 있으면 위 복사 명령으로 덮어쓰지 말고 필요한 항목만 병합합니다. `.env`는 실행 소스 루트의 `package.json` 옆에 둡니다. Drive·Notion 계정 연결과 선택적 임베딩 설정은 [자료 수집 안내](config/corpus/README.md)를 참고하세요. 로컬 파일 등록은 클라우드 계정 없이 사용할 수 있습니다.
+
 ## 환경변수
 
 환경변수의 정본은 `.env.example`입니다. 아래 표는 주요 키 발췌이며, 전체 목록과 최신 기본값은 `.env.example`을 참조하세요.
@@ -55,7 +60,7 @@ cp .env.example .env
 |------|------|--------|
 | `CLAUDE_PATH` | Claude Code CLI 경로 | `claude` |
 | `WORKSPACE_ROOT` | 에이전트 프로젝트 저장 상위 디렉토리 | 자동 감지 |
-| `PROJECTS_FOLDER` | WORKSPACE_ROOT 아래 프로젝트 폴더명 | `agentTeam` |
+| `PROJECTS_FOLDER` | WORKSPACE_ROOT 아래 프로젝트 폴더명 | `mycrew-works` |
 | `NGROK_URL` | ngrok 외부 접속 도메인 | — |
 | `TUNNEL_HOST` | SSH 터널 EC2 IP | — |
 | `TUNNEL_KEY` | SSH 키 경로 | — |
@@ -94,6 +99,8 @@ npm run start:b    # PORT=3459, MYCREW_HOME=.mycrew-B
 |----------|------|
 | `npm run start` | 메인 서버 실행 |
 | `npm run build` | TypeScript 컴파일 + Vite 클라이언트 빌드 |
+| `npm run test:corpus` | 자료 파서·버전 보존·검색·접근 제어 및 Drive/Notion 모의 API 검증 |
+| `npm run test:google-readonly-connection` | 기존 Drive 읽기 전용 연결 회귀 검증 |
 | `npm test` | 전체 테스트 실행 |
 | `npm run verify` | 검증 스크립트 실행 |
 | `npm run start:b` | 멀티 인스턴스 테스트 (PORT=3459, MYCREW_HOME=.mycrew-B) |

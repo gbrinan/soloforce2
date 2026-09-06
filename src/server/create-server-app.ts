@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { createGoogleReadonlyServerRoutes } from "./google-readonly-server.js";
+import { createCorpusRoutes } from './corpus/routes.js';
 import { prepareUpdate, applyPreparedUpdate } from "./update-apply.js";
 import { checkUpdatesNow, getUpdateStatus } from "./update-check.js";
 import { registerRoutes } from "./routes.js";
@@ -38,5 +39,6 @@ export function createServerApp(): Hono {
   });
   app.route("/api/external", storePartnerInstallRoutes);
   app.route("/api/connections/google-drive", createGoogleReadonlyServerRoutes());
+  app.route('/api/corpus', createCorpusRoutes());
   return app;
 }

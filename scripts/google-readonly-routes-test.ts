@@ -24,7 +24,7 @@ class RouteFixtureProvider implements GoogleReadonlyProvider {
     return {
       accessToken: "route-access-token",
       refreshToken: "route-refresh-token",
-      grantedScopes: ["openid", "email", "https://www.googleapis.com/auth/drive.metadata.readonly"],
+      grantedScopes: ["openid", "email", "https://www.googleapis.com/auth/drive.readonly"],
     };
   }
 
