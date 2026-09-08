@@ -6,3 +6,5 @@
 - bun src/manual-qa.ts: PASS. Real local HTTP source ingestion, meeting submission, SQLite pipeline, Markdown and ontology reads, human-review transition and database reopen. Summary generation is explicitly synthetic in this QA script.
 - Private recording and API credentials excluded from repository changes. No external Groq/Gemini request was made in this repository integration pass.
 - Operational prerequisites: service process, matching service token and valid provider keys. Groq live credential validation remains unresolved from the earlier standalone test. Drive/GAS deployment and full live provider flow are not claimed complete.
+
+- GitHub publication: implementation commit 61ea87d successfully pushed to codex/meeting-memory-integration. Main was not merged and no operating server was restarted.
