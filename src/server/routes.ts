@@ -3228,8 +3228,10 @@ export function registerRoutes(app: Hono): void {
       recordingPath?: string;
       title?: string;
       language?: string;
+      transcriptionProvider?: "groq" | "gemini";
     }>().catch(() => null);
     if (!body) return c.json({ error: "invalid json" }, 400);
+    if(body.transcriptionProvider && !["groq","gemini"].includes(body.transcriptionProvider)) return c.json({error:"invalid_transcription_provider"},400);
     const language: MeetingLanguage = body.language === "en" || body.language === "ja" ? body.language : "ko";
 
     // recordingId 또는 recordingPath 중 하나 필요
@@ -3261,6 +3263,7 @@ export function registerRoutes(app: Hono): void {
       shareUrl,
       createdAt: new Date().toISOString(),
       language,
+      transcriptionProvider: body.transcriptionProvider ?? (process.env.MEETING_MEMORY_TRANSCRIBER === "gemini" ? "gemini" : "groq"),
     };
     saveMeetingMeta(meta);
 

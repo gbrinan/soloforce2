@@ -11,6 +11,8 @@ import { checkGroqQuota, recordGroqUsage, isGroqRateLimitError } from "./groq-us
 import { transcribeLocal } from "@mycrew/whisper-local";
 import { transcribeWithGemini } from "./voice-stt.js";
 
+import { processWithMeetingMemory, saveMeetingMemoryArtifacts } from "./meeting-memory.js";
+
 export const RECORDINGS_DIR = join(HISTORY_DIR, "recordings");
 export const MEETINGS_DIR = join(HISTORY_DIR, "outputs", "meetings");
 
@@ -125,6 +127,8 @@ export interface MeetingMeta {
   sttEngine?: "groq" | "gemini" | "local";
   // 회의 언어 — STT 인식 언어 + AI 요약 출력 언어. 미지정 시 "ko"(회귀 방지 기본값).
   language?: MeetingLanguage;
+  transcriptionProvider?: "groq" | "gemini";
+  memoryJobId?: string;
 }
 
 export function saveMeetingMeta(meta: MeetingMeta): void {
@@ -154,6 +158,8 @@ function normalizeMeetingMeta(raw: any, fallbackToken?: string): MeetingMeta | n
     shortSummary: typeof raw.shortSummary === "string" ? raw.shortSummary : undefined,
     sttEngine: raw.sttEngine === "groq" || raw.sttEngine === "gemini" || raw.sttEngine === "local" ? raw.sttEngine : undefined,
     language: raw.language === "ko" || raw.language === "en" || raw.language === "ja" ? raw.language : undefined,
+    transcriptionProvider: raw.transcriptionProvider === "gemini" ? "gemini" : "groq",
+    memoryJobId: typeof raw.memoryJobId === "string" ? raw.memoryJobId : undefined,
     actionItems: Array.isArray(raw.actionItems)
       ? raw.actionItems
           .filter((a: any) => a && typeof a.task === "string")
@@ -212,6 +218,10 @@ export function deleteMeeting(token: string): boolean {
   try {
     if (existsSync(metaPath)) { rmSync(metaPath); any = true; }
     if (existsSync(htmlPath)) { rmSync(htmlPath); any = true; }
+    for (const extension of ['md', 'ontology.json']) {
+      const artifactPath = join(MEETINGS_DIR, `${token}.${extension}`);
+      if (existsSync(artifactPath)) { rmSync(artifactPath); any = true; }
+    }
     return any;
   } catch {
     return false;
@@ -925,6 +935,49 @@ export async function processMeetingInBackground(
       return;
     }
 
+    if (process.env.MEETING_MEMORY_URL && existing) {
+      if (existing.language && existing.language !== 'ko') {
+        throw new Error('meeting_memory_korean_only');
+      }
+      const result = await processWithMeetingMemory({
+        token, title, recordingPath,
+        date: existing.createdAt.slice(0, 10),
+        provider: existing.transcriptionProvider ?? 'groq',
+        onQueued: id => {
+          existing.memoryJobId = id;
+          saveMeetingMeta(existing);
+        },
+      });
+      await saveMeetingMemoryArtifacts(MEETINGS_DIR, token, result);
+      const payload: MeetingPayload = {
+        title,
+        subtitle: '검수 전 초안',
+        summary: result.summary.summary,
+        decisions: result.summary.summary.map(title => ({ title })),
+        actionItems: result.summary.actions.map(action => ({
+          task: action.task,
+          owner: action.owner ?? undefined,
+          dueDate: action.due ?? undefined,
+        })),
+        transcript: {
+          body: result.transcript.map(segment =>
+            '[' + segment.start + '–' + segment.end + 's] ' + segment.speaker + ': ' + segment.text,
+          ).join('\n'),
+        },
+      };
+      writeFileSync(join(MEETINGS_DIR, token + '.html'), renderMeetingHtml(payload, {
+        token, shareUrl: existing.shareUrl, language: 'ko',
+      }));
+      saveMeetingMeta({
+        ...existing,
+        status: 'ready',
+        completedAt: new Date().toISOString(),
+        sttEngine: existing.transcriptionProvider ?? 'groq',
+        shortSummary: result.summary.summary.join('\n'),
+        actionItems: payload.actionItems,
+      });
+      return;
+    }
     const language: MeetingLanguage = existing?.language || "ko";
     console.log(`[meetings] ${token} STT 시작 (${recordingPath}, lang=${language})`);
     const { transcript, engine } = await transcribeWithFallback(token, recordingPath, language);

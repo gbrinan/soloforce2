@@ -1,3 +1,5 @@
+import { createMeetingMemoryRoutes } from "./meeting-memory-routes.js";
+import { MEETINGS_DIR } from "./meetings.js";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createGoogleReadonlyServerRoutes } from "./google-readonly-server.js";
@@ -40,5 +42,6 @@ export function createServerApp(): Hono {
   app.route("/api/external", storePartnerInstallRoutes);
   app.route("/api/connections/google-drive", createGoogleReadonlyServerRoutes());
   app.route('/api/corpus', createCorpusRoutes());
+  app.route('/api/meeting-memory', createMeetingMemoryRoutes(MEETINGS_DIR));
   return app;
 }
