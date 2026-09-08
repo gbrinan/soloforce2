@@ -11,9 +11,9 @@ Private recordings and keys remain outside Git. Existing meeting data is preserv
 
 1. Completed: identified Ubuntu soloforce2.service, release updater, canonical key file and existing local Gmail overlays.
 2. Completed: fast-forwarded main to 1c345e8; canonical Groq/Gemini keys both returned HTTP 200. Installed sidecar and updated release hooks.
-3. Blocked: release updater and service health checks passed, but live summary failed three attempts (invalid_action_evidence, unknown_owner, unknown_owner). Automatic retry stopped; operator decision needed on handling unsupported assignee labels.
+3. Resolved by the repair below: initial live summary failed three attempts (invalid_action_evidence, unknown_owner, unknown_owner); the existing recording is now recovered.
 
 ## Repeated summary failure repair
 1. Completed: captured real candidate; reproduced 5 unsupported owners and 2 unmatched quotations.
-2. Completed: content grounding plus visible review issues; 22 tests/74 assertions and resume-without-upload HTTP check pass.
-3. In progress: build and deploy; recover the existing failed recording without re-transcription and verify all output surfaces.
+2. Completed: content grounding plus visible review issues; 25 tests/80 assertions and resume-without-upload HTTP check pass.
+3. Completed: deployed d545e22; recovered the existing failed recording with unchanged 271-segment transcript. Live Markdown, ontology and HTML passed; 4 actions plus 2 review issues stored as an unreviewed draft. See progress.md.

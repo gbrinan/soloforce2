@@ -23,3 +23,14 @@
 Captured real provider response reproduced failure deterministically: 6 proposed actions, 5 unsupported assignee labels, 2 quotations absent from every segment. Original validator failed; the grounded copy passed the unchanged validator with 4 evidenced actions, 3 unassigned owners, and 5 visible review issues. Four regression tests failed before the patch and passed after it. A resume regression failed with missing-recording ENOENT before the patch and passed afterward without uploading. No customer content or provider keys were placed in fixtures.
 
 Final local verification before deployment: 25 tests/80 assertions PASS; server/client type checks and production build PASS; adapter resume HTTP test PASS. Only API-sized modules were added; no any/assertion escape hatches. Uncertain candidates remain explicit review data rather than asserted graph facts.
+
+## Live repair acceptance — 2026-09-09 KST
+
+- Main implementation d545e22c2c96933f471fdb0169707b61f29e147f deployed by the existing release updater; combined health passed and updater exited 0. Deployment checks included 25 service tests/80 assertions, bridge HTTP, corpus, Google readonly connection and Gmail regression checks.
+- Retried the existing failed job using its persisted transcript, without audio re-upload or re-transcription. Actual Gemini response completed. Transcript hash unchanged across all 271 segments.
+- Soloforce2 metadata resynchronized to ready with the same remote job ID and Groq engine; stale error cleared. Four grounded actions and two explicitly unverified proposals were preserved in their respective sections. The unchanged strict evidence validator passed all asserted data.
+- Live Markdown: HTTP 200, 40,514 bytes, all four sections, collapsed transcript, unreviewed status. Ontology: HTTP 200, four Action entities and reviewed=false. HTML: HTTP 200 with visible review warning text. Private receipt is stored in the runtime state directory; no customer text or access token is committed.
+- Remaining boundary: this verifies direct-upload processing and recovery. Google Drive/GAS installation and automatic folder detection are still separate infrastructure work. Provider outages/quota errors remain explicit errors; uncertain model content no longer fails the entire draft.
+
+- Real headed Chromium QA PASS: warning text visible, four action items present, transcript initially collapsed and opens on click, no browser page errors. The bundled browser version was absent, so the installed Chromium executable was used. An initial text-length probe incorrectly counted only collapsed-page visible text; the corrected acceptance checks assert action count and actual transcript disclosure behavior.
+- Cleanup: no production instrumentation was added. Temporary candidate JSON and local diagnostic journal are removed after verification; the runtime keeps only the normal meeting data and a private content-free verification receipt.
