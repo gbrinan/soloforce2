@@ -5,3 +5,6 @@
 독립 Bun 서비스는 services/meeting-memory에 포함했다. Soloforce2는 Node 및 ky 2를 사용하여 HTTP 경계로 연결한다. 별도 프로세스는 운영 설정이 늘어나는 단점이 있지만 독립 사용과 기존 Node 런타임 유지라는 요구를 충족한다. SQLite 파일을 직접 공유하는 방법은 런타임 결합과 검수 정책 우회 위험 때문에 선택하지 않았다.
 
 추가 운영 제약은 docs/meeting-memory.md가 정본이다. 이번 통합은 기존 구현의 이동·연결이며 새로운 공급자 성능 우위를 주장하지 않는다.
+
+## Repeated validation failure: confirmed mechanism
+A real Gemini candidate contained 6 actions; 5 used an inferred assignee absent from the transcript; 2 quotations matched no single source segment. All 271 transcription segments had the same unidentified speaker label. Exact validation therefore correctly rejected the candidate, but incorrectly made the whole artifact unavailable. Repeating the same model request provided no correction mechanism. The fix separates unsupported proposals into explicit review issues, clears unsupported owners, and repairs an index only on a unique exact quotation match. The strict validator still checks every published action and relation. Tradeoff: a draft can contain unresolved items; these remain visible and never create asserted action/assignment/reference graph links.

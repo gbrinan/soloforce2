@@ -1,3 +1,4 @@
+import { groundSummary } from "./grounding";
 import { HTTPError } from "ky";
 import type { MeetingInput } from "./domain";
 import { z } from "zod";
@@ -38,8 +39,12 @@ export async function tick(store: Store, adapters: Adapters): Promise<void> {
 				meeting,
 				transcript.map((s) => s.text).join(" "),
 			);
-			const summary = Summary.parse(
-				await adapters.summarize({ meeting, transcript, sources }),
+			const summary = groundSummary(
+				Summary.parse(
+					await adapters.summarize({ meeting, transcript, sources }),
+				),
+				transcript,
+				sources,
 			);
 			validateEvidence(summary, transcript, sources);
 			const markdown = render({

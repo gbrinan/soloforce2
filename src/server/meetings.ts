@@ -930,7 +930,7 @@ export async function processMeetingInBackground(
       return;
     }
 
-    if (!existsSync(recordingPath)) {
+    if (!(process.env.MEETING_MEMORY_URL && existing?.memoryJobId) && !existsSync(recordingPath)) {
       markMeetingFailed(token, `recording file not found: ${recordingPath}`);
       return;
     }
@@ -941,6 +941,7 @@ export async function processMeetingInBackground(
       }
       const result = await processWithMeetingMemory({
         token, title, recordingPath,
+        jobId: existing.memoryJobId,
         date: existing.createdAt.slice(0, 10),
         provider: existing.transcriptionProvider ?? 'groq',
         onQueued: id => {
@@ -952,7 +953,7 @@ export async function processMeetingInBackground(
       const payload: MeetingPayload = {
         title,
         subtitle: '검수 전 초안',
-        summary: result.summary.summary,
+        summary: [...result.summary.summary, ...(result.summary.reviewIssues ?? []).map(issue => '[확인 필요] ' + issue.message)],
         decisions: result.summary.summary.map(title => ({ title })),
         actionItems: result.summary.actions.map(action => ({
           task: action.task,
@@ -972,6 +973,7 @@ export async function processMeetingInBackground(
         ...existing,
         status: 'ready',
         completedAt: new Date().toISOString(),
+        errorMessage: undefined,
         sttEngine: existing.transcriptionProvider ?? 'groq',
         shortSummary: result.summary.summary.join('\n'),
         actionItems: payload.actionItems,

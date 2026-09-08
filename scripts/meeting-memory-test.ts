@@ -45,6 +45,7 @@ sidecar.post("/v1/uploads", async (c) => {
 		error: waiting ? "provider_quota_wait" : null,
 	});
 });
+sidecar.get("/v1/meetings/:id", (c) => c.json({ id, status: "ready" }));
 sidecar.get("/v1/meetings/:id/result", (c) => c.json(artifact));
 const server = serve({ fetch: sidecar.fetch, hostname: "127.0.0.1", port: 0 });
 await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -88,6 +89,14 @@ try {
 		).status,
 		403,
 	);
+	received = false;
+	const resumed = await processWithMeetingMemory({
+		...input,
+		jobId: id,
+		recordingPath: join(root, "missing-recording.m4a"),
+	});
+	assert.equal(resumed.markdown, artifact.markdown);
+	assert.equal(received, false, "resuming must not re-upload audio");
 	waiting = true;
 	await assert.rejects(
 		() => processWithMeetingMemory(input),

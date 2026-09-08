@@ -17,3 +17,9 @@
 - Initial Bun launch path was corrected to the package-provided .bin/bun link. Original Downloads folder was unreadable from WSL; a private temporary copy enabled the authorized upload.
 - Live recording upload accepted; Groq produced 271 segments ending at 1274.9199 seconds. Gemini summary was rejected by evidence/owner validation in all three attempts (invalid_action_evidence, unknown_owner, unknown_owner). No completed Markdown or ontology was falsely published. Transcription checkpoint remains for a later corrected retry.
 - Operational health is verified, but full successful live generation is NOT verified. Automatic retries stopped at the configured cap. Requested human decision per workspace three-failure rule.
+
+## Summary reliability repair
+
+Captured real provider response reproduced failure deterministically: 6 proposed actions, 5 unsupported assignee labels, 2 quotations absent from every segment. Original validator failed; the grounded copy passed the unchanged validator with 4 evidenced actions, 3 unassigned owners, and 5 visible review issues. Four regression tests failed before the patch and passed after it. A resume regression failed with missing-recording ENOENT before the patch and passed afterward without uploading. No customer content or provider keys were placed in fixtures.
+
+Final local verification before deployment: 25 tests/80 assertions PASS; server/client type checks and production build PASS; adapter resume HTTP test PASS. Only API-sized modules were added; no any/assertion escape hatches. Uncertain candidates remain explicit review data rather than asserted graph facts.

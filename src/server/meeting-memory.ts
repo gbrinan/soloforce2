@@ -9,6 +9,7 @@ const Result = z.object({
 	ontology: z.object({ schema_version: z.literal(1) }).passthrough(),
 	summary: z.object({
 		summary: z.array(z.string()),
+		reviewIssues: z.array(z.object({ message: z.string() })).optional(),
 		background: z.string(),
 		keyPoints: z.array(z.string()),
 		actions: z.array(
@@ -40,6 +41,7 @@ export async function processWithMeetingMemory(input: {
 	readonly recordingPath: string;
 	readonly date: string;
 	readonly provider: "groq" | "gemini";
+	readonly jobId?: string;
 	readonly onQueued: (id: string) => void;
 }) {
 	const base = new URL(
@@ -64,29 +66,33 @@ export async function processWithMeetingMemory(input: {
 		retry: 0,
 		timeout: 60000,
 	});
-	const bytes = await readFile(input.recordingPath);
-	if (bytes.length > 200 * 1024 * 1024)
-		throw new Error("meeting_memory_audio_limit_200mb");
-	const form = new FormData();
-	form.set(
-		"file",
-		new Blob([new Uint8Array(bytes)]),
-		basename(input.recordingPath),
-	);
-	form.set(
-		"metadata",
-		JSON.stringify({
-			project: "soloforce2",
-			title: input.title,
-			date: input.date,
-			sourceId: input.token,
-			revision: "1",
-			transcriptionProvider: input.provider,
-		}),
-	);
-	let state = State.parse(
-		await client.post("v1/uploads", { body: form }).json(),
-	);
+	let state: z.infer<typeof State>;
+	if (input.jobId) {
+		const jobId = State.shape.id.parse(input.jobId);
+		state = State.parse(await client.get(`v1/meetings/${jobId}`).json());
+	} else {
+		const bytes = await readFile(input.recordingPath);
+		if (bytes.length > 200 * 1024 * 1024)
+			throw new Error("meeting_memory_audio_limit_200mb");
+		const form = new FormData();
+		form.set(
+			"file",
+			new Blob([new Uint8Array(bytes)]),
+			basename(input.recordingPath),
+		);
+		form.set(
+			"metadata",
+			JSON.stringify({
+				project: "soloforce2",
+				title: input.title,
+				date: input.date,
+				sourceId: input.token,
+				revision: "1",
+				transcriptionProvider: input.provider,
+			}),
+		);
+		state = State.parse(await client.post("v1/uploads", { body: form }).json());
+	}
 	input.onQueued(state.id);
 	const deadline = Date.now() + 15 * 60 * 1000;
 	while (state.status === "queued" || state.status === "running") {

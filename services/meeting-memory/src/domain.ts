@@ -48,9 +48,23 @@ export const Meeting = z
 			1,
 		"Exactly one transcript, driveFileId or uploadId required",
 	);
+export const ReviewIssue = z
+	.object({
+		code: z.enum([
+			"owner_unverified",
+			"action_evidence_unverified",
+			"action_segment_corrected",
+			"reference_evidence_unverified",
+		]),
+		candidateIndex: z.number().int().min(0),
+		message: z.string().min(1),
+	})
+	.strict();
+export type ReviewIssueData = z.infer<typeof ReviewIssue>;
 export const Summary = z
 	.object({
 		summary: z.array(z.string().min(1)).min(1).max(20),
+		reviewIssues: z.array(ReviewIssue).optional(),
 		background: z.string().max(5000),
 		keyPoints: z.array(z.string()).max(30),
 		issues: z.array(z.string()).max(20),
@@ -174,8 +188,17 @@ export function render(input: {
 			(a) =>
 				`| ${escapeMarkdown(a.owner ?? "미정")} | ${escapeMarkdown(a.task)} | ${escapeMarkdown(a.due ?? "미정")} | [${transcript[a.segment]?.start}s] ${escapeMarkdown(a.evidence)} |`,
 		),
-		...(summary.actions.length ? [] : ["명시된 할 일 없음."]),
+		...(summary.actions.length ? [] : ["원문 근거가 확인된 할 일 없음."]),
 		"",
+		...((summary.reviewIssues?.length ?? 0)
+			? [
+					"### 확인 필요한 항목",
+					...(summary.reviewIssues?.map(
+						(issue) => "- " + escapeMarkdown(issue.message),
+					) ?? []),
+					"",
+				]
+			: []),
 		"## 3. 과거 데이터와 연결되는 참조",
 		...summary.references.map((r) => {
 			const s = sources.find((s) => s.id === r.sourceId);

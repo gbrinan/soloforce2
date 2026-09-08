@@ -15,6 +15,7 @@ export function graph(store: Store, id: string): unknown {
 	return {
 		"@context": { prov: "http://www.w3.org/ns/prov#" },
 		schema_version: 1,
+		reviewIssues: summary.reviewIssues ?? [],
 		meeting: {
 			id,
 			project: meeting.project,
