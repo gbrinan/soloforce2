@@ -8,3 +8,12 @@
 - Operational prerequisites: service process, matching service token and valid provider keys. Groq live credential validation remains unresolved from the earlier standalone test. Drive/GAS deployment and full live provider flow are not claimed complete.
 
 - GitHub publication: implementation commit 61ea87d successfully pushed to codex/meeting-memory-integration. Main was not merged and no operating server was restarted.
+
+## Operating deployment — 2026-09-09
+
+- Main fast-forward merge and push: 1c345e896b76c44d8690259f3ecaf2eea69d64ad.
+- Existing Ubuntu release updater preserved local Gmail overlays and completed npm build, meeting-memory 18 tests/51 assertions, adapter HTTP test, corpus tests, Google connection tests and Gmail tool regression.
+- Soloforce2 and Meeting Memory systemd units are active and enabled; HTTP health checks pass. Canonical existing Groq and Gemini keys each returned HTTP 200; no keys copied into Git.
+- Initial Bun launch path was corrected to the package-provided .bin/bun link. Original Downloads folder was unreadable from WSL; a private temporary copy enabled the authorized upload.
+- Live recording upload accepted; Groq produced 271 segments ending at 1274.9199 seconds. Gemini summary was rejected by evidence/owner validation in all three attempts (invalid_action_evidence, unknown_owner, unknown_owner). No completed Markdown or ontology was falsely published. Transcription checkpoint remains for a later corrected retry.
+- Operational health is verified, but full successful live generation is NOT verified. Automatic retries stopped at the configured cap. Requested human decision per workspace three-failure rule.

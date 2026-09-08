@@ -10,5 +10,5 @@ Private recordings and keys remain outside Git. Existing meeting data is preserv
 ## Operating deployment
 
 1. Completed: identified Ubuntu soloforce2.service, release updater, canonical key file and existing local Gmail overlays.
-2. In progress: fast-forward GitHub main and prepare sidecar runtime using existing keys.
-3. Pending: run release updater, restart services and verify live HTTP processing.
+2. Completed: fast-forwarded main to 1c345e8; canonical Groq/Gemini keys both returned HTTP 200. Installed sidecar and updated release hooks.
+3. Blocked: release updater and service health checks passed, but live summary failed three attempts (invalid_action_evidence, unknown_owner, unknown_owner). Automatic retry stopped; operator decision needed on handling unsupported assignee labels.
