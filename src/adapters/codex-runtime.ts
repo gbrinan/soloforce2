@@ -1,14 +1,15 @@
-import { isAbsolute, join } from "node:path";
-import { MYCREW_HOME, PROJECT_SELF_DIR } from "../config.js";
+import { join } from "node:path";
+import { MYCREW_HOME } from "../config.js";
 
 export function resolveCodexWriteRoots(paths: readonly string[]): string[] {
-  return paths.map((path) => {
-    const clean = path.replace(/\/?\*\*$/, "");
-    if (isAbsolute(clean) && !clean.startsWith("/")) return clean;
-    const relative = clean.replace(/^\//, "");
-    const dataPath = ["history/outputs/", "history/agents/", "history/external/"]
-      .some((prefix) => relative.startsWith(prefix));
-    return join(dataPath ? MYCREW_HOME : PROJECT_SELF_DIR, relative);
+  // Extra native roots cover artifacts only; role/config writes retain SafeFS approval.
+  return paths.flatMap((path) => {
+    const relative = path.replace(/^\//, "").replace(/\/\*\*$/, "");
+    if (!relative.startsWith("history/outputs/")) return [];
+    const segments = relative.split("/");
+    if (segments.some((segment) => !segment || segment === "." || segment === ".."
+      || /[\\:*?{}\[\]]/.test(segment))) return [];
+    return [join(MYCREW_HOME, relative)];
   });
 }
 

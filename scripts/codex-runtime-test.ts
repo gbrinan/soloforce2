@@ -13,7 +13,14 @@ assert.notEqual(MYCREW_HOME, PROJECT_SELF_DIR, "Run with an isolated MYCREW_HOME
 assert.deepEqual(resolveCodexWriteRoots([
   "/history/outputs/training-designer/**", "/history/agents/training-designer/**", "/src/**",
 ]), [join(MYCREW_HOME, "history/outputs/training-designer"),
-  join(MYCREW_HOME, "history/agents/training-designer"), join(PROJECT_SELF_DIR, "src")]);
+]);
+
+assert.deepEqual(resolveCodexWriteRoots([
+  "/history/agents/training-designer/**", "/history/external/partners.json",
+  "/history/**", "/**", "C:/outside/**", "C:\\outside\\**",
+  "//server/share/**", "/history/outputs/../../agents/**",
+  "/history/outputs/demo/../../../outside/**", "/history/outputs/*/**",
+]), []);
 
 // Given a provider error with no stderr, retain the actionable message.
 assert.equal(codexEventError({ type: "error", message: "upgrade required" }), "upgrade required");

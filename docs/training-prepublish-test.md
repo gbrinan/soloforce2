@@ -11,7 +11,13 @@
 - 변경: 명시적인 Windows 샌드박스, 자동 승인 검토, 필수 SafeFS 시작, MYCREW_HOME 기준 쓰기 루트, 제공자·MCP 오류 보존. 안전장치를 해제하지 않았다.
 - 실제 시험에서 앞에 슬래시를 붙인 `/history/...`와 잘못된 저장 루트를 사용한 것도 실패 원인이었다. 역할 지침과 문서는 SafeFS의 `history/...` 상대경로를 명시한다.
 - 재현: `node node_modules/tsx/dist/cli.mjs scripts/codex-runtime-test.ts`, 빌드 후 `node scripts/training-pipeline-smoke.mjs --live` (현재 CLI를 CODEX_PATH로 지정).
-- 로컬 실행 증거: `history/test-runs/training-smoke-1788891385213/history/outputs/training-designer/smoke/`. 고객 자료나 인증 파일은 배포하지 않는다.
+- 로컬 실행 증거: `history/test-runs/training-smoke-1788893818105/history/outputs/training-designer/smoke/`. 고객 자료나 인증 파일은 배포하지 않는다.
+
+## 최종 검토 보완
+
+- 추가 네이티브 쓰기 루트는 history/outputs 하위의 명시적 경로로 제한한다. 역할 지침·파트너 설정·절대경로·상위 폴더 이동·와일드카드 경로를 추가 루트로 승격하지 않는다. 기존 작업 디렉터리의 Codex 권한과 SafeFS의 파일별 승인 정책은 서로 다른 경계다.
+- Windows ZIP 경로 구분자를 처리하고, 두 에이전트·호출 템플릿·문서·검증 스크립트를 명시적으로 포함한다. 합성 ZIP 시험에서 9개 필수 파일 포함, 비공개 모의 에이전트 제외, PII 표식 발견 시 배포 거절을 확인했다. 실제 운영 PII 목록으로 전체 배포 ZIP을 생성한 시험은 아니다.
+- 전체 빌드와 신규 런타임 회귀 시험은 통과했다. 이 체크아웃의 npm test는 기존 route-keyword-collision-test.ts에서 등록된 운영 직원이 0명이라 23건 실패한다. 변경 전 체크아웃에서도 재현되며 해당 시험·라우터는 수정하지 않았다.
 
 ## 최초 재시험 기록
 
@@ -24,13 +30,13 @@
 | 설치된 CLI 0.153.4 + Astra | 응답 PASS / 산출물 FAIL | 모델이 응답했으나 brief.md 미저장을 명시 |
 | CLI 0.153.4 + Terra 파일 저장 | FAIL | 명시적인 허용 경로에 쓰기를 요청했으나 safefs 도구가 제공되지 않는다고 응답. 실제 파일 없음 |
 
-## 관찰된 문제
+## 최초 시험 당시 관찰된 문제 (현재 수정 완료)
 
 1. PATH의 CLI는 0.144.5, 데스크톱 앱에 포함된 CLI는 0.153.4였다. CODEX_PATH를 테스트 프로세스에서만 후자로 지정하자 Astra 응답이 성공했다. 전역 설치나 서버 설정은 변경하지 않았다.
 2. 실제 파일을 만들지 못한 응답도 어댑터는 success=true로 반환했다. 프로세스의 정상 종료가 교육 산출물 완성을 보장하지 않는다.
 3. 새 CLI에서 SafeFS 가용성과 쓰기 경로가 정상 작동하는지는 미해결이다. 모델의 오류 보고와 파일 부재를 확인했으며, 특정 권한 설정을 원인으로 단정하지 않는다.
 
-## 시험 범위와 재개 조건
+## 최초 시험 당시 범위와 재개 조건 (이력)
 
 - 실운영 서버의 큐를 사용하지 않고 격리된 MYCREW_HOME에서 실제 Codex 어댑터를 호출했다. 회사·개인 자료는 사용하지 않았다.
 - Astra/Terra가 각각 모델 응답을 반환하는 것까지 확인했다. 4단계 HTTP 작업 전체가 통과한 것은 아니다.

@@ -24,7 +24,7 @@ const steps = [
   { files: ["brief.md"], task: "10분짜리 일반 AI 채팅 기반 합계 검산 실습을 brief.md 하나에 설계한다. 합성 데이터는 id,amount 컬럼과 A=10,B=20,C=30이다. 목표, 총 10분 시간표, 정답60, 환경제약을 간결하게 적는다. 전체 교안은 다음 단계가 작성한다." },
   { files: ["data.csv", "session.md"], task: "brief.md를 읽는다. 지정된 세 행을 data.csv(id,amount 헤더)에 쓰고, 그 데이터로 실습하는 session.md를 작성한다. 복사할 프롬프트, 입력, 정답60, 검산방법, 실패 복구를 간결히 포함한다." },
   { files: ["review.md", "review.json"], task: "brief.md, data.csv, session.md를 읽고 행별 amount 합과 시간·환경 적합성을 검토한다. review.md와 기계검사용 review.json을 작성한다. JSON 형식은 {status: PASS 또는 REVISE 또는 BLOCKED, total: 실제 합계, rows: 실제 데이터 행수}이다. 오류가 있으면 명시한다." },
-  { files: ["handoff.md", "validation.json"], task: "앞 단계 파일과 review.md를 읽는다. 수정이 필요하면 반영한다. handoff.md에 파일 연결과 남은 검증을 적고 validation.json에는 실제 확인한 {total: 합계, rows: 행수, reviewStatus: 검토판정}을 쓴다. 실제 실행하지 않은 학습자 환경을 검증했다고 하지 않는다." },
+  { files: ["handoff.md", "validation.json"], task: "앞 단계 파일과 review.md를 읽는다. 수정이 필요하면 반영하고, REVISE 판정이면 validation.md에 수정 내용과 재검토 필요 상태를 반드시 기록한다. handoff.md에 파일 연결과 남은 검증을 적고 validation.json에는 실제 확인한 {total: 합계, rows: 행수, reviewStatus: 검토판정}을 쓴다. 실제 실행하지 않은 학습자 환경을 검증했다고 하지 않는다." },
 ];
 const evidence = { runId, outputDir, stages: [] };
 let previous = "";
