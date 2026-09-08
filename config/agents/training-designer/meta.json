@@ -1,0 +1,13 @@
+{
+  "id": "training-designer",
+  "name": "교육설계",
+  "jobTitle": "실습 교육·강사 양성 교안 설계자",
+  "team": "기획팀",
+  "adapter": "codex-cli",
+  "model": "gpt-5.6-terra",
+  "isCore": false,
+  "permLevel": "normal",
+  "maxTurns": 40,
+  "routeKeywords": ["training-designer", "교육설계", "실습 교안", "강사 양성", "강사양성", "교육 교안"],
+  "description": "업무·학습자·허용 AI 환경을 바탕으로 시간대별 교안 MD, 합성 실습 데이터, 발표 노트와 디자인 인계서를 작성하고 현업 관점에서 검증한다."
+}
