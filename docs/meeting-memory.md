@@ -4,7 +4,7 @@
 
 ## 실행
 
-1. `services/meeting-memory`에서 `bun install --frozen-lockfile`을 실행한다.
+1. FFmpeg를 설치한다(예: Ubuntu `sudo apt-get install ffmpeg`). `services/meeting-memory`에서 `bun install --frozen-lockfile`을 실행한다.
 2. 해당 폴더의 `.env.example`을 `.env`로 복사하고 `SERVICE_TOKEN`, `GROQ_API_KEY`, `GEMINI_API_KEY`를 설정한다. 토큰은 충분히 긴 무작위 값으로 정한다.
 3. 같은 폴더에서 `bun start`로 서비스를 실행한다. 기본 주소는 `http://127.0.0.1:8787`이다.
 4. Soloforce2 루트 `.env`에 아래 설정을 추가하고 Soloforce2를 재시작한다.
@@ -44,7 +44,7 @@ Drive 감지는 서비스의 [GAS 및 설치 안내](../services/meeting-memory/
 
 ## 실패와 운영
 
-인증 오류·할당량 초과는 오류로 표시한다. 다른 공급자나 유료 모델로 자동 전환하지 않는다. `memoryJobId`는 회의 메타데이터에 남으므로 서비스의 상태 API에서 원인을 확인하고 설정 수정 후 `/v1/meetings/<id>/retry`를 호출할 수 있다. 15분 폴링 제한 이후에도 서비스 작업은 보존된다. 재처리 결과를 Soloforce2로 자동 재동기화하는 기능은 아직 없다.
+인증 오류·할당량 초과는 오류로 표시한다. 다른 공급자나 유료 모델로 자동 전환하지 않는다. `memoryJobId`는 회의 메타데이터에 남으므로 서비스의 상태 API에서 원인을 확인하고 설정 수정 후 `/v1/meetings/<id>/retry`를 호출할 수 있다. 90분 폴링 제한 이후에도 서비스 작업은 보존된다. 재처리 결과를 Soloforce2로 자동 재동기화하는 기능은 아직 없다.
 
 Soloforce2에서 삭제하면 해당 HTML·메타·Markdown·온톨로지 스냅샷을 삭제한다. 독립 서비스의 SQLite 원본과 녹음은 별도 보존되므로 운영자가 보관 정책을 관리한다. `MEETING_MEMORY_URL`을 비우면 기존 회의 처리 방식이 적용된다.
 
@@ -59,3 +59,9 @@ Soloforce2에서 삭제하면 해당 HTML·메타·Markdown·온톨로지 스냅
 `reviewIssues[].candidateIndex`는 모델의 원래 후보 목록 위치이다. 확인이 필요한 초안도 출력이 준비되면 ready지만, 사람 검수 전 reviewed는 false다. 네트워크·인증·할당량·잘못된 JSON 등 실제 처리 오류는 여전히 실패 또는 대기 상태로 구분한다.
 
 기존 `memoryJobId`가 있는 회의는 서버 처리 함수를 재개할 때 해당 결과를 조회하므로 녹음 파일 재업로드를 하지 않는다. 서비스 재처리는 저장된 전사 체크포인트를 재사용한다.
+
+## 긴 녹음과 연결 복구
+
+전사 전에 FFmpeg로 음성을 해독하고 낮은 음량 구간을 제외한 최대 3분 구간을 처리한다. 원본 오디오는 보존하며 타임스탬프를 원본 기준으로 복원한다. 구간별 캐시는 DATA_DIR/chunks에 저장되고 실패 후 재개할 때 이미 완료한 공급자 호출을 반복하지 않는다. 캐시도 개인정보이므로 운영 데이터와 같은 접근·삭제 정책을 적용한다.
+
+상태·결과 GET은 네트워크 오류, 타임아웃 및 일시적 HTTP 오류에 최대 5회 재연결한다. 업로드 POST는 자동 재전송하지 않는다. 영구 인증 오류와 할당량 대기는 정상 결과로 위장하지 않는다. 서비스 설치 절차와 음량 검수 한계는 [서비스 README](../services/meeting-memory/README.md)를 따른다.

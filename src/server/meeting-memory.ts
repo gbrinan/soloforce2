@@ -63,7 +63,13 @@ export async function processWithMeetingMemory(input: {
 	const client = ky.create({
 		prefix: base.href.replace(/\/$/, ""),
 		headers: { Authorization: `Bearer ${token}` },
-		retry: 0,
+		retry: {
+			limit: 5,
+			methods: ["get"],
+			retryOnTimeout: true,
+			backoffLimit: 5000,
+			maxRetryAfter: 10000,
+		},
 		timeout: 60000,
 	});
 	let state: z.infer<typeof State>;
@@ -94,7 +100,7 @@ export async function processWithMeetingMemory(input: {
 		state = State.parse(await client.post("v1/uploads", { body: form }).json());
 	}
 	input.onQueued(state.id);
-	const deadline = Date.now() + 15 * 60 * 1000;
+	const deadline = Date.now() + 90 * 60 * 1000;
 	while (state.status === "queued" || state.status === "running") {
 		if (Date.now() >= deadline)
 			throw new Error("meeting_memory_timeout_job_preserved");

@@ -24,6 +24,8 @@ const artifact = {
 	},
 	transcript: [{ start: 0, end: 1, speaker: "미상", text: "결정" }],
 };
+let stateFailures = 0;
+let droppedConnections = 0;
 let received = false,
 	waiting = false;
 const sidecar = new Hono();
@@ -45,9 +47,21 @@ sidecar.post("/v1/uploads", async (c) => {
 		error: waiting ? "provider_quota_wait" : null,
 	});
 });
-sidecar.get("/v1/meetings/:id", (c) => c.json({ id, status: "ready" }));
+sidecar.get("/v1/meetings/:id", (c) => {
+	if (stateFailures > 0) {
+		stateFailures--;
+		return c.json({ error: "temporarily unavailable" }, 503);
+	}
+	return c.json({ id, status: "ready" });
+});
 sidecar.get("/v1/meetings/:id/result", (c) => c.json(artifact));
 const server = serve({ fetch: sidecar.fetch, hostname: "127.0.0.1", port: 0 });
+server.prependListener("request", (request) => {
+	if (droppedConnections > 0) {
+		droppedConnections--;
+		request.socket.destroy();
+	}
+});
 await new Promise<void>((resolve) => server.once("listening", resolve));
 const address = server.address();
 assert.ok(address && typeof address === "object");
@@ -90,13 +104,24 @@ try {
 		403,
 	);
 	received = false;
+	stateFailures = 2;
 	const resumed = await processWithMeetingMemory({
 		...input,
 		jobId: id,
 		recordingPath: join(root, "missing-recording.m4a"),
 	});
 	assert.equal(resumed.markdown, artifact.markdown);
+	assert.equal(stateFailures, 0);
 	assert.equal(received, false, "resuming must not re-upload audio");
+	droppedConnections = 1;
+	const reconnected = await processWithMeetingMemory({
+		...input,
+		jobId: id,
+		recordingPath: join(root, "missing.m4a"),
+	});
+	assert.equal(reconnected.markdown, artifact.markdown);
+	assert.equal(droppedConnections, 0);
+	assert.equal(received, false);
 	waiting = true;
 	await assert.rejects(
 		() => processWithMeetingMemory(input),
