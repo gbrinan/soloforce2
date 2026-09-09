@@ -27,3 +27,8 @@ Private recordings and keys remain outside Git. Existing meeting data is preserv
 1. Completed: red/green regression for transient HTTP failure; new silence/chunk/cache tests and actual FFmpeg HTTP-provider fixture pass.
 2. Completed: 31 service tests/102 assertions, dropped-connection adapter tests and full production build pass; implementation commits pushed.
 3. Completed with external limitation: 0153041 deployed and health passed. Groq retest and browser passed with original hashes unchanged; near-silent overlap9→3. Gemini completed one chunk then parked on quota, including one bounded resume. Full Gemini completion remains blocked on external quota; no further calls active.
+
+## Selective Gemini transcription
+1. Completed: explicit Groq/Gemini action buttons, quota copy and Groq API default.
+2. Completed: production build, adapter regression and real-component browser QA at 375/768/1280px with zero provider calls.
+3. In progress: independent UI review, publish, deploy and verify health; record evidence.

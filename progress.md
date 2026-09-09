@@ -60,3 +60,11 @@ Final local verification before deployment: 25 tests/80 assertions PASS; server/
 
 - Final bounded Gemini resume again returned provider_quota_wait after15s; no additional chunks completed (9 Groq +1 Gemini cache files). It remains waiting, with no active retries. Full long-Gemini success is explicitly unverified; next operator can retry the same job after quota recovery.
 - Final report is outputs/meeting-memory-retest/재시험 결과.md, with private per-case artifacts and original hash receipts outside Git. No raw customer content or keys entered source changes.
+
+## Selective Gemini controls verification
+- Added explicit Groq/Gemini recording actions and provider-specific title dialog copy in ko/en/ja; both modes disclose Gemini summary quota. API omission now means Groq, regardless of the previous environment default.
+- Full production build and meeting-memory HTTP adapter regression passed. Browser drove the actual MeetingDrawer/Dialog components at 375/768/1280px: both providers sent correct explicit payloads, cancel sent nothing, pending and existing processing disabled both buttons. Provider calls: zero (intercepted fixture requests).
+- Initial full-shell browser attempt was blocked by intermittent local WSL availability and startup/auth dependencies. Switched to an isolated production bundle of the real components; all interaction assertions passed. Browser cleanup initially exceeded command timeout after assertions; bounded cleanup rerun exited 0. Temporary harness source removed from product tree; private evidence is outside Git under outputs/meeting-memory-retest/button-*.
+- Existing large client chunk warning remains; no unrelated app optimization or dev dependency changes were introduced for these controls.
+
+Independent functional review passed. Visual review found Korean word splits in dialog descriptions; changed the shared description wrapping to keep-all with anywhere overflow for long unbroken strings. Regenerated all six captures and re-ran interaction QA successfully; final production build passed.

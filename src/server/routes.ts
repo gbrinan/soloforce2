@@ -3263,7 +3263,7 @@ export function registerRoutes(app: Hono): void {
       shareUrl,
       createdAt: new Date().toISOString(),
       language,
-      transcriptionProvider: body.transcriptionProvider ?? (process.env.MEETING_MEMORY_TRANSCRIBER === "gemini" ? "gemini" : "groq"),
+      transcriptionProvider: body.transcriptionProvider ?? "groq",
     };
     saveMeetingMeta(meta);
 

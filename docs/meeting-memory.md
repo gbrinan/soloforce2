@@ -19,7 +19,7 @@ MEETING_MEMORY_TRANSCRIBER=groq
 
 ## 사용과 결과 조회
 
-기존 화면에서 녹음을 업로드한 뒤 회의록 생성을 실행한다. 기본 공급자는 Groq이며 Gemini를 선택하려면 환경변수 `MEETING_MEMORY_TRANSCRIBER=gemini`를 사용하거나 기존 `POST /api/meetings/summarize` 요청에 `"transcriptionProvider":"gemini"`를 추가한다. 현재 화면에는 공급자 선택 버튼을 추가하지 않았다.
+기존 화면에서 녹음을 업로드한 뒤 `Groq 전사·요약`을 실행한다. 정밀 전사가 필요할 때만 `Gemini 전사·요약` 버튼을 선택한다. 제목 입력창에서 공급자와 할당량 사용 안내를 확인한 뒤 실행하며, 취소하면 요청하지 않는다. 두 방식 모두 요약은 Gemini를 사용하므로 Google 할당량을 소비한다. API에서 공급자를 생략하면 항상 Groq를 사용한다. Gemini 전사는 `POST /api/meetings/summarize`에 `"transcriptionProvider":"gemini"`를 명시해야 하며, 환경변수로 암묵적으로 선택하지 않는다.
 
 ```json
 {"recordingId":"업로드로_받은_ID","title":"회의 제목","language":"ko","transcriptionProvider":"gemini"}

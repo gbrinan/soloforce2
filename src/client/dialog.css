@@ -111,7 +111,8 @@
   line-height: 1.6;
   color: var(--text-secondary);
   white-space: pre-line;
-  word-break: break-word;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   margin: 10px 0 0;
 }
 

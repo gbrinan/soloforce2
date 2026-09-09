@@ -12,8 +12,9 @@ interface Props {
   recordings: RecordingMeta[];
   meetings: MeetingMeta[];
   loading: boolean;
+  summaryPending: boolean;
   onAttachToChat: (rec: RecordingMeta) => void;
-  onSummarize: (rec: RecordingMeta) => void;
+  onSummarize: (rec: RecordingMeta, provider: 'groq' | 'gemini') => void;
   onCopyUrl: (url: string) => void;
   onRefresh: () => void;
   onDeleteRecording: (rec: RecordingMeta) => void;
@@ -50,7 +51,7 @@ function fmtRelative(iso: string | undefined | null, t: ReturnType<typeof useT>)
   return d.toISOString().slice(0, 10);
 }
 
-export default function RecordingList({ recordings, meetings, loading, onAttachToChat, onSummarize, onCopyUrl, onRefresh, onDeleteRecording, onDeleteMeeting }: Props) {
+export default function RecordingList({ recordings, meetings, loading, summaryPending, onAttachToChat, onSummarize, onCopyUrl, onRefresh, onDeleteRecording, onDeleteMeeting }: Props) {
   const t = useT();
 
   const sendToNote = async (token: string) => {
@@ -111,10 +112,19 @@ export default function RecordingList({ recordings, meetings, loading, onAttachT
               </button>
               <button
                 type="button"
-                onClick={() => onSummarize(r)}
+                onClick={() => onSummarize(r, 'groq')}
+                disabled={summaryPending || meetings.some((m) => m.recordingPath === r.path && m.status === 'processing')}
                 style={meetingBtn.neutral}
               >
-                {t('meeting.summarizeBtn')}
+                {t('meeting.groqSummarizeBtn')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSummarize(r, 'gemini')}
+                disabled={summaryPending || meetings.some((m) => m.recordingPath === r.path && m.status === 'processing')}
+                style={meetingBtn.neutral}
+              >
+                {t('meeting.geminiSummarizeBtn')}
               </button>
               <button
                 type="button"

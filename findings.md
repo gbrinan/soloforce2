@@ -19,3 +19,6 @@ Final Gemini outcome: three attempts ended failed with no transcript checkpoint;
 
 ## Post-fix live outcome
 Audio filtering/chunking reduced the observed near-silent overlap metric9→3 and the Groq record completed. Gemini now successfully produced one bounded chunk before an external quota response blocked the remaining15; one delayed resume returned the same quota condition. This does not establish whole-recording Gemini accuracy or completion. Quota recovery is the remaining external prerequisite; cached progress is retained.
+
+## Selective Gemini transcription
+The existing drawer omits transcriptionProvider; the API can select Gemini from an environment default. Both provider modes still use Gemini for summary. Explicit per-recording buttons and an always-Groq omitted API default make transcription opt-in without implying summaries avoid Google quota. Reuse meetingBtn and the existing title dialog; no new component library is needed.

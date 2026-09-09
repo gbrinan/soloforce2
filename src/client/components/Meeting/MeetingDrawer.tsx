@@ -42,6 +42,8 @@ export default function MeetingDrawer({ visible, onClose, onAttachToChat }: Prop
   const [meetings, setMeetings] = useState<MeetingMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [summaryPending, setSummaryPending] = useState(false);
+  const summaryPendingRef = useRef(false);
   const [isRecording, setIsRecording] = useState(false);
   const [summaryLanguage, setSummaryLanguage] = useState<'ko' | 'en' | 'ja'>('ko');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,20 +146,24 @@ export default function MeetingDrawer({ visible, onClose, onAttachToChat }: Prop
     }
   }, [onAttachToChat]);
 
-  const requestSummarize = useCallback(async (rec: RecordingMeta) => {
-    const title = await uiPrompt({
-      title: t('meeting.promptTitle'),
-      label: t('meeting.promptLabel'),
-      initialValue: t('meeting.defaultTitle', { date: new Date().toISOString().slice(0, 10) }),
-      placeholder: t('meeting.promptPlaceholder'),
-      confirmLabel: t('meeting.requestSummary'),
-    });
-    if (title === null) return;
+  const requestSummarize = useCallback(async (rec: RecordingMeta, transcriptionProvider: 'groq' | 'gemini') => {
+    if (summaryPendingRef.current) return;
+    summaryPendingRef.current = true;
+    setSummaryPending(true);
     try {
+      const title = await uiPrompt({
+        title: t('meeting.promptTitle'),
+        description: t(transcriptionProvider === 'gemini' ? 'meeting.geminiQuota' : 'meeting.groqQuota'),
+        label: t('meeting.promptLabel'),
+        initialValue: t('meeting.defaultTitle', { date: new Date().toISOString().slice(0, 10) }),
+        placeholder: t('meeting.promptPlaceholder'),
+        confirmLabel: t(transcriptionProvider === 'gemini' ? 'meeting.geminiSummarizeBtn' : 'meeting.groqSummarizeBtn'),
+      });
+      if (title === null) return;
       const res = await fetch('/api/meetings/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId: rec.id, title: title || undefined, language: summaryLanguage }),
+        body: JSON.stringify({ recordingId: rec.id, title: title || undefined, language: summaryLanguage, transcriptionProvider }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -167,8 +173,11 @@ export default function MeetingDrawer({ visible, onClose, onAttachToChat }: Prop
       await refresh();
     } catch (err) {
       await uiAlert({ title: t('meeting.summaryFailed'), description: err instanceof Error ? err.message : String(err), variant: 'info' });
+    } finally {
+      summaryPendingRef.current = false;
+      setSummaryPending(false);
     }
-  }, [refresh, summaryLanguage]);
+  }, [refresh, summaryLanguage, t]);
 
   const copyShareUrl = useCallback(async (url: string) => {
     try {
@@ -284,10 +293,15 @@ export default function MeetingDrawer({ visible, onClose, onAttachToChat }: Prop
           ))}
         </div>
 
+        <Text size="sm" c="dimmed" style={{ wordBreak: 'keep-all' }}>
+          {t('meeting.providerQuotaHint')}
+        </Text>
+
         <RecordingList
           recordings={recordings}
           meetings={meetings}
           loading={loading}
+          summaryPending={summaryPending}
           onAttachToChat={attachRecordingToChat}
           onSummarize={requestSummarize}
           onCopyUrl={copyShareUrl}
