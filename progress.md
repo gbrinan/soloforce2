@@ -34,3 +34,29 @@ Final local verification before deployment: 25 tests/80 assertions PASS; server/
 
 - Real headed Chromium QA PASS: warning text visible, four action items present, transcript initially collapsed and opens on click, no browser page errors. The bundled browser version was absent, so the installed Chromium executable was used. An initial text-length probe incorrectly counted only collapsed-page visible text; the corrected acceptance checks assert action count and actual transcript disclosure behavior.
 - Cleanup: no production instrumentation was added. Temporary candidate JSON and local diagnostic journal are removed after verification; the runtime keeps only the normal meeting data and a private content-free verification receipt.
+
+## Existing recording batch test — preflight
+- Inventory: 22 records, 16 unique source paths, all source files exist. Selected five: WEBM 441.777s (Groq), M4A 2817.344s (Groq), WAV 60.719979s (Groq), previously failed WEBM 875.755s (Groq), WEBM 2780.986s (explicit Gemini, 44.8MB).
+- Full ffmpeg decode to null passed for all five without decoder warnings; SHA-256 recorded privately. No original files or existing meeting outputs changed.
+- Automatic approval review rejected the live batch runner before process creation because explicit consent for sending these recordings to Groq/Gemini and creating production results was required. No provider requests or test meetings were created. Awaiting that consent; no bypass attempted.
+- Resume artifacts outside repository: outputs/meeting-memory-batch/{manifest.json,preflight.json,run.mjs}. Manifest contains private source paths; never commit. Run sequentially only after consent; reports are resumable by completed case and preserve existing results.
+
+- User explicitly approved the five-recording external/provider batch and separate production output creation. Two preparation attempts stopped before network submission on Windows-to-WSL path conversion; explicit separator normalization corrected the runner. First production case submitted successfully; previous results remain intact.
+
+## Existing recording batch — final acceptance
+- Approved five-case run completed: four Groq cases ready, one Gemini case failed. All five originals (audio, original metadata, original HTML) retained matching hashes. Separate test records were created; no provider fallback or original overwrite occurred.
+- Groq results: 96 / 618 / 10 / 129 transcript segments. Four cases passed strict evidence checks, four-section Markdown, ontology, actual HTTP and headed Chromium transcript disclosure checks with no page errors.
+- Quality warning: the previously failed WEBM has nine segments overlapping >90% near-silence (-35dB, minimum 1s); repeated closing phrases suggest hallucination. No claim of word-level accuracy or exhaustive speech coverage.
+- Gemini 46m21s/44.8MB: first two attempts gemini_output_incomplete; third processing_failed; terminal failed with no transcript checkpoint. App polling separately failed with a network error while the remote job remained queued/running. Both units active with NRestarts=0. A conditional request to hold a queued retry changed zero rows because the final attempt was already running; it then terminated normally at the retry cap. No further attempts made.
+- Private report and artifacts: workspace outputs/meeting-memory-batch/테스트 결과.md, report.json, browser-qa.json, silence-audit.json and per-case Markdown/ontology. Contains customer-derived data; excluded from Git. Production source unchanged. Follow-up scope: silence-aware transcription, long-audio chunking, recoverable status polling and more specific provider error reporting.
+
+## Audio reliability repair — local evidence
+- Existing status helper failed the newly added HTTP 503 scenario before the change; after GET-only retries it passes 503 and forcibly dropped TCP connection cases without re-upload. A first test command timeout was rerun with adequate allowance and passed.
+- New audio modules were absent in initial red run; after implementation all 31 tests/102 assertions pass, including an actual FFmpeg decode and local HTTP transcription fixture. Cache test resumes after failure without repeating the first provider call.
+- Canonical Ubuntu FFmpeg prerequisite installed. Local original-audio planning: problematic WEBM becomes 9 parts/620.54 transmitted seconds (last part ends809.26s versus875.755s source); 46m21s WEBM becomes16 bounded parts. This is planning evidence only; live transcription acceptance still pending.
+
+- Production deployment 015304140386c7fd89234cebdae0d9133772d6a0 passed updater regressions and health. Live Groq retest succeeded in49s with118 segments; original hashes unchanged, Markdown/ontology and browser disclosure pass. Near-silent overlap metric decreased9→3; repeated closing phrases decreased8→4. Remaining low-volume segments are not automatically declared false.
+- Live Gemini segmented run completed its first chunk, then parked on provider_quota_wait with one completed Gemini chunk plus nine Groq chunks cached. This is an external quota limit; full long-Gemini success is not yet established.
+
+- Final bounded Gemini resume again returned provider_quota_wait after15s; no additional chunks completed (9 Groq +1 Gemini cache files). It remains waiting, with no active retries. Full long-Gemini success is explicitly unverified; next operator can retry the same job after quota recovery.
+- Final report is outputs/meeting-memory-retest/재시험 결과.md, with private per-case artifacts and original hash receipts outside Git. No raw customer content or keys entered source changes.

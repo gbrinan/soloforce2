@@ -17,3 +17,13 @@ Private recordings and keys remain outside Git. Existing meeting data is preserv
 1. Completed: captured real candidate; reproduced 5 unsupported owners and 2 unmatched quotations.
 2. Completed: content grounding plus visible review issues; 25 tests/80 assertions and resume-without-upload HTTP check pass.
 3. Completed: deployed d545e22; recovered the existing failed recording with unchanged 271-segment transcript. Live Markdown, ontology and HTML passed; 4 actions plus 2 review issues stored as an unreviewed draft. See progress.md.
+
+## Existing recordings live batch test
+1. Completed: inventory 22 records, 16 unique recording paths; all files exist.
+2. Completed: approved five-recording production tests executed. Four Groq successes; one Gemini terminal failure after three attempts. No additional retries.
+3. Completed: original hashes preserved; four successful result pages verified in Chromium. Report records one near-silence quality warning, long-Gemini failure and status-polling failure. These limitations remain follow-up work, not passing quality claims.
+
+## Audio reliability implementation
+1. Completed: red/green regression for transient HTTP failure; new silence/chunk/cache tests and actual FFmpeg HTTP-provider fixture pass.
+2. Completed: 31 service tests/102 assertions, dropped-connection adapter tests and full production build pass; implementation commits pushed.
+3. Completed with external limitation: 0153041 deployed and health passed. Groq retest and browser passed with original hashes unchanged; near-silent overlap9→3. Gemini completed one chunk then parked on quota, including one bounded resume. Full Gemini completion remains blocked on external quota; no further calls active.
