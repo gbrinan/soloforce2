@@ -52,7 +52,10 @@ export async function generateGemini(
 		);
 	const candidate = response.candidates[0];
 	if (!candidate || candidate.finishReason !== "STOP")
-		throw new ServiceError("gemini_output_incomplete");
+		throw new ServiceError(
+			"gemini_output_incomplete:" +
+				(candidate?.finishReason ?? "missing_candidate"),
+		);
 	return JSON.parse(
 		candidate.content.parts
 			.filter((p) => !p.thought)
@@ -94,20 +97,18 @@ export async function withGeminiAudio<T>(
 	)
 		throw new ServiceError("invalid_gemini_upload_url");
 	let file = RemoteFile.parse(
-		z
-			.object({ file: RemoteFile })
-			.parse(
-				await http
-					.post(upload, {
-						headers: {
-							"X-Goog-Upload-Offset": "0",
-							"X-Goog-Upload-Command": "upload, finalize",
-						},
-						body: audio.blob,
-						timeout: 600000,
-					})
-					.json(),
-			).file,
+		z.object({ file: RemoteFile }).parse(
+			await http
+				.post(upload, {
+					headers: {
+						"X-Goog-Upload-Offset": "0",
+						"X-Goog-Upload-Command": "upload, finalize",
+					},
+					body: audio.blob,
+					timeout: 600000,
+				})
+				.json(),
+		).file,
 	);
 	try {
 		const deadline = Date.now() + 120000;

@@ -7,7 +7,7 @@ import { tick } from "./pipeline";
 import { Store } from "./store";
 import { summarize } from "./summarize";
 import { loadUpload } from "./uploads";
-import { transcribe } from "./transcribe";
+import { transcribeAudio } from "./audio-transcription";
 
 const settings = Config.parse(process.env);
 await mkdir(settings.DATA_DIR, { recursive: true });
@@ -33,7 +33,7 @@ console.info(`Meeting Memory listening on ${server.url}`);
 while (!stopped) {
 	await tick(store, {
 		transcribe: async (id, revision, meeting) =>
-			transcribe(
+			transcribeAudio(
 				meeting.uploadId
 					? loadUpload(store, meeting.uploadId)
 					: await downloadDrive(id, revision, settings),

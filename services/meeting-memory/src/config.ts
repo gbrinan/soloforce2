@@ -1,5 +1,6 @@
 import { z } from "zod";
 export const Config = z.object({
+	FFMPEG_PATH: z.string().default("ffmpeg"),
 	GEMINI_CLI_ENTRY: z.string().default(""),
 	GEMINI_CLI_MODEL: z.string().default(""),
 	GEMINI_CLI_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),

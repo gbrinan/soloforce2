@@ -1,7 +1,7 @@
 # 설치와 실서비스 연결
 
 ## 로컬 서비스
-Bun 1.3.3 이상을 설치한 뒤 프로젝트 폴더에서:
+Bun 1.3.3 이상과 FFmpeg를 설치한 뒤 프로젝트 폴더에서:
 
 ```sh
 bun install --frozen-lockfile
@@ -30,7 +30,7 @@ docker compose up -d --build
 
 모델 설치는 [Speaches 공식 절차](https://speaches.ai/usage/speech-to-text/)를 따른다. 컨테이너 내부 8000번 전사 서버는 외부에 공개하지 않는다. 제공한 Compose는 CPU 예제이며 실제 이미지 실행·모델 다운로드는 아직 검증하지 않았다. 운영 시 검증한 이미지 digest로 고정한다.
 
-Gemini를 쓰려면 `TRANSCRIBER=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL`을 지정한다. 현재 Gemini 어댑터는 15MB 이하 inline 음성만 허용한다. 큰 파일은 Whisper를 사용한다. 서버 공통 입력은 200MB 이하이다. 긴 회의의 분할·병합 및 Gemini Files API는 미구현이다.
+Gemini를 쓰려면 `TRANSCRIBER=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL`을 지정한다. 서버 공통 입력은200MiB·4시간 이하이다. FFmpeg로 해독한 음성을 최대 3분 구간으로 나눠 Gemini Files API로 처리하며 타임스탬프를 원본 기준으로 복원한다.
 
 ## Claude / 스타일
 `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`을 지정한다. 기본 모델 ID의 계정별 사용 가능 여부는 실호출로 확인해야 한다. `STYLE_PATH`가 가리키는 파일을 본인 회의록 샘플로 교체하면 문체만 참고한다. JSON 형식은 코드가 강제하고 인용은 실제 전사·검색 자료와 대조한다. 스키마 준수가 요약 사실성을 보증하지 않으므로 검수가 필요하다.
@@ -82,7 +82,7 @@ Drive 등록 JSON에 `transcriptionProvider: "groq"` 또는 `"gemini"`를 지정
 ```
 {"project":"demo","title":"운영 회의","date":"2026-09-09","sourceId":"recording-01","revision":"1","transcriptionProvider":"gemini"}
 ```
-파일명 확장자로 형식을 확인한다. 녹음은200MiB까지, Groq 선택은25MB까지 허용한다. 초과 파일은 Gemini를 명시적으로 선택하거나 사전에 나누어 업로드한다. 서버 업로드는 SQLite BLOB에 저장하며 보존 정책은 운영자가 관리한다. Gemini Files API 업로드는 전사 후 삭제를 시도하고 실패하면 경고를 남긴다(공급자 자동 만료48시간).
+파일명 확장자로 형식을 확인한다. 녹음은200MiB·4시간까지 허용한다. Groq에도 자동 분할된 WAV 구간을 전송하므로 원본 파일을 직접 25MB 미만으로 나눌 필요는 없다. 서버 업로드는 SQLite BLOB에 저장하며 보존 정책은 운영자가 관리한다. Gemini Files API 업로드는 전사 후 삭제를 시도하고 실패하면 경고를 남긴다(공급자 자동 만료48시간).
 
 결과는 `GET /v1/meetings/{id}/markdown`, `/ontology`로 조회한다. 온톨로지는 영속 저장된 회의·요약·참조에서 생성되며 별도 그래프 DB는 아니다. 4개 Markdown 섹션과 접힌 전문은 유지한다.
 
