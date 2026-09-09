@@ -8,7 +8,7 @@
 import * as pty from "node-pty";
 import { homedir } from "node:os";
 import { safeChildEnv } from "./utils/safeChildEnv.js";
-import { claudeAuthed } from "./claude-cli.js";
+import { claudeAuthed, clearClaudeAuthExpired } from "./claude-cli.js";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 
@@ -60,6 +60,7 @@ function finish(s: LoginSession, authenticated: boolean, error?: string): void {
   if (s.done) return;
   s.done = true;
   s.authenticated = authenticated;
+  if (authenticated) clearClaudeAuthExpired();
   if (error) s.error = error;
   if (s.autoEnterTimer) { clearTimeout(s.autoEnterTimer); s.autoEnterTimer = null; }
   if (s.killTimer) { clearTimeout(s.killTimer); s.killTimer = null; }
@@ -73,8 +74,10 @@ function finish(s: LoginSession, authenticated: boolean, error?: string): void {
 }
 
 // 게이트 [로그인 시작] — 이미 진행 중이면 그 세션 상태를 그대로 반환(idempotent).
-export function startClaudeLogin(): ClaudeLoginStatus {
-  if (claudeAuthed()) return { running: false, url: null, done: true, authenticated: true, tail: "" };
+// force: 인증됨으로 보여도 로그인을 새로 띄운다. 토큰 만료를 파일만으로 판별할 수 없는 경우
+// (mac Keychain 등) 사용자가 재로그인을 시작할 유일한 경로다.
+export function startClaudeLogin(force = false): ClaudeLoginStatus {
+  if (!force && claudeAuthed()) return { running: false, url: null, done: true, authenticated: true, tail: "" };
   if (session && !session.done) return getClaudeLoginStatus();
 
   const s: LoginSession = {

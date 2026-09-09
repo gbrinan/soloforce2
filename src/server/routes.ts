@@ -2071,7 +2071,8 @@ export function registerRoutes(app: Hono): void {
 
   // 온보딩 게이트 [로그인 시작] (1-2 잔여) — 서버가 claude를 PTY로 띄워 OAuth URL을 추출·표시.
   // 게이트 화면이 status를 폴링해 URL·터미널 tail을 보여주고, input이 인증 코드를 PTY로 중계한다.
-  app.post("/api/notes/ai/claude/login/start", (c) => c.json(startClaudeLogin()));
+  // force=1: 인증됨으로 보이는 상태에서도 재로그인 — 토큰 만료 후 게이트가 안 열릴 때의 탈출구.
+  app.post("/api/notes/ai/claude/login/start", (c) => c.json(startClaudeLogin(c.req.query("force") === "1")));
   app.get("/api/notes/ai/claude/login/status", (c) => c.json(getClaudeLoginStatus()));
   app.post("/api/notes/ai/claude/login/input", async (c) => {
     const body = await c.req.json().catch(() => null) as { text?: string } | null;

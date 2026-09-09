@@ -35,10 +35,36 @@ export interface ClaudeDetectResult {
 // 미로그인 상태가 인증됨으로 오판돼 온보딩 게이트가 반쪽 상태로 통과된다 — 실측(2026-07-13)
 // 로그인 완료 시에만 생기는 oauthAccount 키를 확인한다. (mac은 자격을 Keychain에 저장하므로
 // .credentials.json이 없고 이 키가 유일한 파일 시그널)
+// claude CLI가 401(토큰 만료)로 실패한 사실을 기록 — 파일 시그널만으로는 만료를 알 수 없어
+// (자격 파일은 만료 후에도 남는다) 게이트가 "인증됨"으로 오판하고 재로그인 UI를 감춘다.
+// runClaude의 실제 실패를 진실로 삼아 claudeAuthed를 false로 되돌린다. 재로그인·성공 시 해제.
+let authExpired = false;
+const AUTH_EXPIRED_RE = /oauth access token has expired|401[^\n]*authenticat|re-authenticate/i;
+
+export function markClaudeAuthExpired(): void { authExpired = true; }
+export function clearClaudeAuthExpired(): void { authExpired = false; }
+
+// 자격 파일의 OAuth 토큰이 만료됐고 refreshToken도 없으면 CLI가 스스로 갱신할 수 없다.
+// refreshToken이 있으면 CLI 실행 시 자동 갱신되므로 만료만으로 미인증 판정하지 않는다.
+function credentialsUnrecoverable(path: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    const oauth = raw.claudeAiOauth as Record<string, unknown> | undefined;
+    if (!oauth || typeof oauth.accessToken !== "string") return false;
+    const expiresAt = Number(oauth.expiresAt) || 0;
+    if (!expiresAt || expiresAt > Date.now()) return false;
+    return typeof oauth.refreshToken !== "string" || !oauth.refreshToken;
+  } catch {
+    return false;
+  }
+}
+
 export function claudeAuthed(): boolean {
+  if (authExpired) return false;
   const home = homedir();
-  if (existsSync(join(home, ".claude", ".credentials.json"))) return true;
-  if (existsSync(join(home, ".config", "claude", ".credentials.json"))) return true;
+  for (const p of [join(home, ".claude", ".credentials.json"), join(home, ".config", "claude", ".credentials.json")]) {
+    if (existsSync(p)) return !credentialsUnrecoverable(p);
+  }
   try {
     const cfg = JSON.parse(readFileSync(join(home, ".claude.json"), "utf-8")) as Record<string, unknown>;
     return Boolean(cfg.oauthAccount);
@@ -181,8 +207,17 @@ export function runClaude(prompt: string, system = "", model = "", timeoutMs = 1
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (code === 0) resolve({ ok: true, text: out.trim() });
-      else resolve({ ok: false, error: `claude 종료 코드 ${code}${err ? `: ${err.slice(0, 300)}` : ""}` });
+      if (code === 0) {
+        clearClaudeAuthExpired();
+        resolve({ ok: true, text: out.trim() });
+        return;
+      }
+      if (AUTH_EXPIRED_RE.test(err) || AUTH_EXPIRED_RE.test(out)) {
+        markClaudeAuthExpired();
+        resolve({ ok: false, error: "클로드코드 로그인이 만료되었습니다. 재로그인이 필요합니다." });
+        return;
+      }
+      resolve({ ok: false, error: `claude 종료 코드 ${code}${err ? `: ${err.slice(0, 300)}` : ""}` });
     });
   });
 }
