@@ -31,4 +31,4 @@ Private recordings and keys remain outside Git. Existing meeting data is preserv
 ## Selective Gemini transcription
 1. Completed: explicit Groq/Gemini action buttons, quota copy and Groq API default.
 2. Completed: production build, adapter regression and real-component browser QA at 375/768/1280px with zero provider calls.
-3. In progress: independent UI review, publish, deploy and verify health; record evidence.
+3. Completed: functional and final visual reviews passed; b36e396 published/deployed with preserved overlays. Both health endpoints returned 200 and deployed JS contains the provider controls. Full-shell browser navigation remains unverified due local startup/access behavior; actual-component UI QA passed.

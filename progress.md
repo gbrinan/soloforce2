@@ -68,3 +68,5 @@ Final local verification before deployment: 25 tests/80 assertions PASS; server/
 - Existing large client chunk warning remains; no unrelated app optimization or dev dependency changes were introduced for these controls.
 
 Independent functional review passed. Visual review found Korean word splits in dialog descriptions; changed the shared description wrapping to keep-all with anywhere overflow for long unbroken strings. Regenerated all six captures and re-ran interaction QA successfully; final production build passed.
+
+Selective Gemini deployed revision: b36e39614fd31ed1587a1574f2f7fd9f95f50252. Updater exited 0 after service tests, adapter, corpus, Google read-only and Project Drive regression checks. Preserved all four existing runtime overlays. Warmed app /api/health and sidecar /health returned 200; deployed index-BTEMUQmx.js contains meeting.geminiSummarizeBtn. Final independent visual/CJK review PASS on all six regenerated screenshots. Full-shell browser navigation did not reach the meeting panel within timeout; stopped that approach, no real provider requests. Component browser assertions and deployment verification are the proven acceptance scope.
