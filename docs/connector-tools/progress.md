@@ -69,6 +69,26 @@
 **부수 발견**: 테스트에서 `process.env.X = undefined`가 문자열 `"undefined"`를 넣어
 뒤 단계가 그 값을 진짜 client로 알고 도는 함정. `restoreEnv()`로 `delete` 처리.
 
+### Phase 6: 로컬 완주 준비 ✅
+
+L3·L4를 사용자가 자기 머신에서 바로 돌릴 수 있게 두 가지 마찰을 없앴다.
+
+1. **`.env`가 라이브 테스트에 안 실렸다** — `.env` 파싱이 `src/index.ts` 부팅 코드에만
+   있어 스크립트는 못 봤다. `src/load-dotenv.ts`로 빼 둘이 공유한다(SSOT).
+   이 모듈은 node 내장만 import한다 — `config.ts`가 평가 시점에 `process.env`를 굳히므로
+   `.env` 적용 전에 그 그래프가 딸려오면 안 되기 때문이다.
+2. **L4가 refresh token을 env로 요구했다** — 그런데 그 값은 금고에 AES-GCM으로 봉인돼
+   있어 사람이 꺼낼 수 없다(`e2e.md` 초안이 `connections.json`에서 꺼내라고 잘못 적었다).
+   L4가 **설정 화면에서 만든 실제 연결을 그대로 태우도록** 고쳤다 — 사용자가 겪는 경로와
+   같아져 검증 가치도 올라갔다.
+
+**회귀 확인**: 부팅 경로를 건드렸으므로 서버 실기동으로 확인(`/api/connectors` 200).
+서버·클라이언트 typecheck 통과, 커넥터 계약 테스트 T1–T7 PASS.
+
+※ 이 환경의 `npm test`는 `route-keyword-collision-test`(실 `history/agents.json` 필요)에서
+`&&` 체인이 끊겨 커넥터 테스트까지 도달하지 않는다. 변경 전에도 동일한 사전 실패다 —
+커넥터 테스트는 `npm run test:connectors`로 단독 검증했다.
+
 ## 남은 것 (다음 사이클 후보)
 
 - 실계정 E2E 잔여분 L3·L4 — 실 OAuth client가 있는 환경에서 완주 (`e2e.md` 절차)

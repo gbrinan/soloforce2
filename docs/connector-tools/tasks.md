@@ -7,7 +7,7 @@ OAuth 만료를 복구 가능한 상태로 바꾼다.
 
 ## Current Phase
 
-✅ Phase 5: 실계정 E2E (L3·L4는 실 자격증명 대기)
+✅ Phase 6: 로컬 완주 준비 (L3·L4는 사용자 머신에서 실행 대기)
 
 ## Phases
 
@@ -52,6 +52,13 @@ OAuth 만료를 복구 가능한 상태로 바꾼다.
 - [ ] L3 폐기 토큰 → `needs_reauth` (실 `GOOGLE_OAUTH_CLIENT_ID/SECRET` 필요)
 - [ ] L4 실계정 Drive·Gmail 왕복 (실 `GOOGLE_OAUTH_REFRESH_TOKEN` 필요)
 - [ ] Notion 실호출 (`api.notion.com`이 프록시 allowlist 밖 — 로컬에서 확인)
+
+### Phase 6: 로컬 완주 준비 ✅
+
+- [x] `.env` 로더를 `src/load-dotenv.ts`로 SSOT 추출 — 라이브 테스트가 `.env`를 읽는다
+- [x] L4가 설정 화면에서 만든 실제 연결을 사용 (refresh token 수동 추출 불필요)
+- [x] `e2e.md`의 잘못된 절차 교정 (금고 위치·추출 불가 명시)
+- [x] 부팅 경로 회귀 확인 (서버 실기동)
 
 ## Out of Scope
 

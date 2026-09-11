@@ -7,13 +7,21 @@
 //   L1  네트워크만                        (실 구글 토큰 엔드포인트의 오류 분류)
 //   L2  네트워크만                        (실 Drive API의 401 형태)
 //   L3  GOOGLE_OAUTH_CLIENT_ID/SECRET     (폐기된 refresh token → 재동의 분기)
-//   L4  + GOOGLE_OAUTH_REFRESH_TOKEN      (실계정 Drive·Gmail 왕복)
+//   L4  위 + 실제 Google 연결              (실계정 Drive·Gmail 왕복)
+//       — 설정 화면에서 연결해 두면 그 연결을 그대로 쓴다. GOOGLE_OAUTH_REFRESH_TOKEN이
+//         있으면 그것도 쓴다. refresh token을 손으로 꺼낼 필요는 없다(금고에 암호화돼 있다).
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
+import { loadDotenv } from "../src/load-dotenv.js";
 import { ConnectorTokenStore, ConnectorAuthError } from "../src/server/connectors/token-store.js";
+
+// .env를 먼저 실어야 한다 — 사용자가 자격증명을 두는 곳이 거기다.
+// config.ts는 모듈 평가 시점에 process.env를 굳히므로 그 뒤에 동적 import한다.
+loadDotenv();
+const { HISTORY_DIR } = await import("../src/config.js");
 
 const KEY = Buffer.alloc(32, 11).toString("base64");
 let temp = "";
@@ -115,19 +123,36 @@ async function l3_revokedRefreshTokenNeedsReauth(): Promise<void> {
   console.log("  L3 실 구글 invalid_grant → needs_reauth ✓");
 }
 
-/** L4 — 실계정 왕복: 갱신 → Drive 검색 → Gmail 라벨 (실 refresh token 필요). */
+/**
+ * L4 — 실계정 왕복: 갱신 → Drive 검색 → Gmail 라벨.
+ *
+ * 우선 **설정 화면에서 만든 실제 연결**을 쓴다. refresh token은 금고에 AES-GCM으로
+ * 봉인돼 있어 손으로 꺼낼 수 없고, 꺼낼 필요도 없다 — 저장된 연결을 그대로 태우는 것이
+ * 사용자가 겪는 경로와 같다. env에 refresh token을 둔 설치본은 그 경로로도 돈다.
+ */
 async function l4_realAccountRoundTrip(): Promise<void> {
-  if (!process.env.GOOGLE_OAUTH_REFRESH_TOKEN
-      || !process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
-    return skip("L4 실계정 Drive·Gmail 왕복", "GOOGLE_OAUTH_REFRESH_TOKEN(+CLIENT_ID/SECRET)");
-  }
-  const s = store({
-    GOOGLE_OAUTH_CLIENT_ID: process.env.GOOGLE_OAUTH_CLIENT_ID,
-    GOOGLE_OAUTH_CLIENT_SECRET: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
-    GOOGLE_OAUTH_REFRESH_TOKEN: process.env.GOOGLE_OAUTH_REFRESH_TOKEN,
-  });
+  const hasClient = Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+  if (!hasClient) return skip("L4 실계정 Drive·Gmail 왕복", "GOOGLE_OAUTH_CLIENT_ID/SECRET");
 
-  // env 정적 토큰이 연결로 승격되고, 첫 호출이 실제 갱신을 태운다.
+  // 실제 연결이 있으면 그것을 쓴다 (temp를 세우지 않으므로 cleanup이 건드리지 않는다).
+  const real = new ConnectorTokenStore({ historyDir: HISTORY_DIR });
+  const record = real.getRecord("google");
+  let s: ConnectorTokenStore;
+  if (record?.state === "connected") {
+    console.log(`     실제 연결 사용 — ${record.accountLabel ?? "(계정 미표시)"} (${HISTORY_DIR})`);
+    s = real;
+  } else if (process.env.GOOGLE_OAUTH_REFRESH_TOKEN) {
+    console.log("     env의 GOOGLE_OAUTH_REFRESH_TOKEN 사용");
+    s = store({
+      GOOGLE_OAUTH_CLIENT_ID: process.env.GOOGLE_OAUTH_CLIENT_ID,
+      GOOGLE_OAUTH_CLIENT_SECRET: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      GOOGLE_OAUTH_REFRESH_TOKEN: process.env.GOOGLE_OAUTH_REFRESH_TOKEN,
+    });
+  } else {
+    return skip("L4 실계정 Drive·Gmail 왕복",
+      `연결된 Google (설정 → 계정 연결) 또는 GOOGLE_OAUTH_REFRESH_TOKEN — 현재 상태: ${record?.state ?? "연결 기록 없음"}`);
+  }
+
   const token = await s.getAccessToken("google");
   assert.ok(token.length > 20, "실 액세스 토큰을 받아야 한다");
   assert.equal(s.getRecord("google")?.state, "connected");

@@ -1,16 +1,9 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+// ※ 여기서 import하는 것은 node 내장과 load-dotenv뿐이어야 한다 — config.ts가 모듈 평가
+// 시점에 process.env를 굳히므로, .env가 적용되기 전에 그 그래프가 딸려오면 안 된다.
+// (아래 server/index.js를 동적 import하는 이유이기도 하다)
+import { loadDotenv } from "./load-dotenv.js";
 
-// .env 로드
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dirname, "..", ".env");
-if (existsSync(envPath)) {
-  for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-    const match = line.match(/^([^#=]+)=(.*)$/);
-    if (match) process.env[match[1].trim()] ??= match[2].trim();
-  }
-}
+loadDotenv();
 
 // 인자 파싱
 const args = process.argv.slice(2);

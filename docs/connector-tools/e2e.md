@@ -104,11 +104,16 @@ L3·L4는 이 환경에 자격증명이 없어 SKIP됐다. 아래를 갖춘 곳�
 
 ```bash
 npm start                      # 설정 → 서비스 정책 → 계정 연결 → Google "연결"
-npm run test:connectors:live   # L3 실행 (L4는 refresh token까지 있어야 함)
+npm run test:connectors:live   # L1~L4 전부
 ```
 
-동의 화면을 통과하면 `connections.json`에 refresh token이 봉인되고, 그 값을
-`GOOGLE_OAUTH_REFRESH_TOKEN`으로 내보내면 L4까지 돈다.
+라이브 테스트가 `.env`를 직접 읽으므로 따로 export할 필요는 없다.
+**refresh token을 손으로 꺼낼 필요도 없다** — L4는 설정 화면에서 만든 연결을 그대로 태운다.
+
+> refresh token은 `history/connectors/secrets/google.json`에 AES-256-GCM으로 봉인돼 있다.
+> `connections.json`에는 상태·계정·스코프만 있고 비밀은 없다. 금고를 열려면 암호화 키
+> (`SOLOFORCE_CONNECTION_ENCRYPTION_KEY` 또는 `history/.connector-key`)가 필요하므로
+> 사람이 읽어서 env로 옮기는 경로는 없다 — 그럴 필요가 없게 L4가 저장된 연결을 쓴다.
 
 ### 확인할 것
 
