@@ -20,22 +20,27 @@ const mock = new Hono();
 const bytes = Buffer.from('고객,금액\n현대,001250\n');
 let versionChanged = false; let metadataReads = 0; let trashed = false; let tooLarge = false; let canDownload = true;
 let exported = false; let corruptChecksum = false; let remoteForbidden = false;
+let transferBytes = bytes; let badRange = false;
 mock.post('/token', c => c.json({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', expires_in: 3600, token_type: 'Bearer', scope: GOOGLE_READONLY_SCOPES.join(' ') }));
 mock.get('/identity', c => c.json({ sub: 'fixture-subject', email: 'owner@example.test', email_verified: true }));
 mock.get('/drive/files/:id/export', c => {
   assert.equal(c.req.header('authorization'), 'Bearer fixture-access');
   assert.equal(c.req.query('mimeType'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  exported = true; return c.body(new Uint8Array(bytes));
+  exported = true; return c.body(new Uint8Array(transferBytes));
 });
 mock.get('/drive/files/:id', c => {
   assert.equal(c.req.header('authorization'), 'Bearer fixture-access');
   if (remoteForbidden) return c.json({ error: 'forbidden' }, 403);
-  if (c.req.query('alt') === 'media') return c.body(new Uint8Array(bytes));
+  if (c.req.query('alt') === 'media') {
+    const range = c.req.header('range')?.match(/^bytes=(\d+)-(\d+)$/);
+    if (range && !badRange) { const start = Number(range[1]); const end = Number(range[2]); c.header('Content-Range', `bytes ${start}-${end}/${transferBytes.length}`); return c.body(new Uint8Array(transferBytes.subarray(start, end + 1)), 206); }
+    return c.body(new Uint8Array(transferBytes));
+  }
   metadataReads++;
   const native = c.req.param('id') === 'native-sheet';
   return c.json({ id: c.req.param('id'), name: native ? '원본 시트' : 'sales.csv', mimeType: native ? 'application/vnd.google-apps.spreadsheet' : 'text/csv',
-    version: versionChanged && metadataReads % 2 === 0 ? '2' : '1', size: tooLarge ? '30000000' : String(bytes.length), trashed,
-    capabilities: { canDownload }, md5Checksum: corruptChecksum ? 'bad' : createHash('md5').update(bytes).digest('hex') });
+    version: versionChanged && metadataReads % 2 === 0 ? '2' : '1', size: tooLarge ? '30000000' : String(transferBytes.length), trashed,
+    capabilities: { canDownload }, md5Checksum: corruptChecksum ? 'bad' : createHash('md5').update(transferBytes).digest('hex') });
 });
 mock.get('/drive/files', c => c.json({ files: [{ id: 'fixture-file', name: 'sales.csv', mimeType: 'text/csv' }] }));
 const pageId = '11111111-1111-1111-1111-111111111111';
@@ -53,9 +58,10 @@ mock.get('/notion/pages/:id', c => {
 });
 mock.get('/notion/blocks/:id/children', c => {
   const text = (id: string, value: string, children = false) => ({ id, type: 'paragraph', has_children: children, paragraph: { rich_text: [{ plain_text: value }] } });
-  if (c.req.param('id') === 'nested') return c.json({ results: [text('inside', '중첩 본문 증거')], has_more: false });
-  if (c.req.query('start_cursor') === 'opaque=cursor/2') return c.json({ results: [{ id: 'row', type: 'table_row', table_row: { cells: [[{ plain_text: '현대' }], [{ plain_text: '001250' }]] } }, { id: 'photo', type: 'image', image: { file: { url: 'https://example.invalid/signed' } } }], has_more: false });
-  return c.json({ results: [text('nested', '상위 본문', true)], has_more: true, next_cursor: malformedCursor ? null : 'opaque=cursor/2' });
+  const heading = (id: string, value: string) => ({ id, type: 'heading_1', heading_1: { rich_text: [{ plain_text: value }] } });
+  if (c.req.param('id') === 'nested') return c.json({ results: [heading('child-heading', '하위 범위'), text('inside', '중첩 본문 증거')], has_more: false });
+  if (c.req.query('start_cursor') === 'opaque=cursor/2') return c.json({ results: [text('after', '바깥 본문'), { id: 'row', type: 'table_row', table_row: { cells: [[{ plain_text: '현대' }], [{ plain_text: '001250' }]] } }, { id: 'photo', type: 'image', image: { file: { url: 'https://example.invalid/signed' } } }], has_more: false });
+  return c.json({ results: [heading('root-heading', '주 문서'), text('nested', '상위 본문', true)], has_more: true, next_cursor: malformedCursor ? null : 'opaque=cursor/2' });
 });
 const server = serve({ fetch: mock.fetch, hostname: '127.0.0.1', port: 0 });
 await new Promise<void>(resolve => server.once('listening', resolve));
@@ -73,6 +79,31 @@ try {
     const file = await provider.readFile('refresh', 'native-sheet');
     assert.ok(exported); assert.equal(file.exported, true); assert.equal(file.name, '원본 시트.xlsx'); assert.equal(file.revision, '1');
   });
+  await test('Drive export resume rechecks previously accepted bytes at the same revision', async () => {
+    const { CorpusIntakeService } = await import('../src/server/corpus/intake.js');
+    const intake = new CorpusIntakeService(new CorpusStore(join(root, 'export-resume', 'corpus')));
+    transferBytes = Buffer.alloc(5 * 1024 * 1024, 65);
+    let id = ''; let stop = true;
+    const sink = {
+      async begin(meta: { name: string; bytes: number; mime: string }) {
+        if (!id) id = intake.create({ name: meta.name, bytes: meta.bytes, mime: meta.mime }).id;
+        return intake.read(id).uploadedBytes;
+      },
+      async write(offset: number, part: Buffer) {
+        if (stop && offset > 0) throw new Error('synthetic interruption');
+        await intake.append(id, offset, part, createHash('sha256').update(part).digest('hex'));
+      },
+    };
+    await assert.rejects(provider.transferFile('refresh', 'native-sheet', sink));
+    assert.equal(intake.read(id).uploadedBytes, 4 * 1024 * 1024);
+    stop = false; transferBytes[0] = 66;
+    await assert.rejects(provider.transferFile('refresh', 'native-sheet', sink), /intake_part_conflict/);
+    assert.equal(intake.read(id).uploadedBytes, 4 * 1024 * 1024);
+    transferBytes[0] = 65;
+    await provider.transferFile('refresh', 'native-sheet', sink);
+    assert.equal((await intake.finish(id)).contentHash, createHash('sha256').update(transferBytes).digest('hex'));
+    transferBytes = bytes;
+  });
   await test('Drive changes, deleted files, disabled download, size and checksum fail closed', async () => {
     metadataReads = 0; versionChanged = true; await assert.rejects(provider.readFile('refresh', 'fixture-file'), /source_changed_retry/); versionChanged = false;
     trashed = true; await assert.rejects(provider.readFile('refresh', 'fixture-file'), /drive_download_forbidden/); trashed = false;
@@ -80,6 +111,18 @@ try {
     tooLarge = true; await assert.rejects(provider.readFile('refresh', 'fixture-file'), /file_too_large/); tooLarge = false;
     corruptChecksum = true; await assert.rejects(provider.readFile('refresh', 'fixture-file'), /drive_checksum_mismatch/); corruptChecksum = false;
     remoteForbidden = true; await assert.rejects(provider.readFile('refresh', 'fixture-file'), /drive_content_fetch_failed/); remoteForbidden = false;
+  });
+  await test('Drive range transfer resumes without re-downloading accepted bytes and rejects an ignored range', async () => {
+    transferBytes = Buffer.alloc(5 * 1024 * 1024, 65); let received = 0; let interrupt = true;
+    const parts: Buffer[] = [];
+    const sink = { async begin(meta: { bytes: number }) { assert.equal(meta.bytes, transferBytes.length); return received; },
+      async write(offset: number, value: Buffer) { assert.equal(offset, received); if (interrupt && received) throw new Error('synthetic interruption'); parts.push(value); received += value.length; } };
+    await assert.rejects(provider.transferFile('refresh', 'fixture-file', sink)); assert.equal(received, 4 * 1024 * 1024);
+    interrupt = false; await provider.transferFile('refresh', 'fixture-file', sink); assert.deepEqual(Buffer.concat(parts), transferBytes);
+    badRange = true; received = 4 * 1024 * 1024; await assert.rejects(provider.transferFile('refresh', 'fixture-file', sink), /drive_range_not_supported/); badRange = false;
+    metadataReads = 0; versionChanged = true; received = transferBytes.length;
+    await assert.rejects(provider.transferFile('refresh', 'fixture-file', sink), /source_changed_retry/); versionChanged = false;
+    transferBytes = bytes;
   });
   await test('Drive OAuth -> list -> import -> search -> revoke uses encrypted credential broker', async () => {
     const registry = new GoogleConnectionRegistry({ projectRoot: root });
@@ -100,6 +143,10 @@ try {
     assert.equal(imported.status, 201, await imported.clone().text());
     const result = await searchCorpus(corpus.store, '현대', { allowed: s => drive.isConnectionActive(s.connectionId!) });
     assert.ok(result.hits.some(h => h.text.includes('001250')));
+    const received = await routes.request(`http://localhost/${id}/intake`, { method: 'POST', headers: { origin: 'http://localhost', 'content-type': 'application/json' }, body: '{"fileId":"fixture-file","labels":[]}' });
+    assert.equal(received.status, 201, await received.clone().text());
+    const receipt = await received.json() as { job: { state: string; contentHash: string } };
+    assert.equal(receipt.job.state, 'queued'); assert.equal(receipt.job.contentHash, createHash('sha256').update(bytes).digest('hex'));
     drive.revokeConnection(id);
     assert.equal((await searchCorpus(corpus.store, '현대', { allowed: s => drive.isConnectionActive(s.connectionId!) })).hits.length, 0);
     await assert.rejects(drive.readFile(id, 'fixture-file'), /connection_inactive/);
@@ -109,10 +156,12 @@ try {
   await test('Notion recursively paginates opaque cursors and preserves table cells + original blocks', async () => {
     const input = await notion.readPage(`https://app.notion.com/p/${pageId}`, ['프로젝트:선박A']);
     assert.ok(input.extracted?.chunks.some(c => c.text.includes('중첩 본문 증거')));
-    assert.ok(input.extracted?.chunks.some(c => c.cells?.includes('001250')));
+    assert.ok(input.extracted?.units?.some(c => c.cells?.includes('001250')));
     assert.ok(input.extracted?.profile.routes.some(r => r.route === 'ocr' && r.status === 'needs_tool'));
     assert.equal(input.backup, 'page_snapshot'); assert.ok(!input.bytes.toString().includes('test-notion-token'));
-    assert.equal(JSON.parse(input.bytes.toString()).blocks.length, 4);
+    assert.equal(JSON.parse(input.bytes.toString()).blocks.length, 7);
+    assert.deepEqual(input.extracted?.units?.find(unit => unit.text === '중첩 본문 증거')?.headingPath, ['하위 범위']);
+    assert.deepEqual(input.extracted?.units?.find(unit => unit.text === '바깥 본문')?.headingPath, ['주 문서']);
   });
   await test('Notion rejects changing pages, revoked access, archived pages and broken pagination', async () => {
     pageReads = 0; notionChanged = true; await assert.rejects(notion.readPage(pageId), /source_changed_retry/); notionChanged = false;

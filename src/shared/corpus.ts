@@ -14,6 +14,17 @@ export interface CorpusChunk {
   text: string;
   // 표의 값은 문자열로 보존한다. 숫자 변환이나 수식 재계산을 하지 않는다.
   cells?: string[];
+  /** Search derivatives refer to a structural unit; cell arrays live there once. */
+  unitId?: string;
+}
+export interface SourceUnit {
+  id: string;
+  kind: 'text' | 'table';
+  locator: string;
+  text: string;
+  headingPath: string[];
+  cells?: string[];
+  contextStatus: 'section' | 'row_with_header' | 'page' | 'block';
 }
 export interface CorpusSnapshot {
   schemaVersion: 1;
@@ -33,12 +44,14 @@ export interface CorpusSnapshot {
   labels: string[];
   profile: CorpusProfile;
   chunks: CorpusChunk[];
+  units?: SourceUnit[];
   backup: 'original' | 'export' | 'page_snapshot';
 }
-export interface CorpusSource extends Omit<CorpusSnapshot, 'chunks'> {
+export interface CorpusSource extends Omit<CorpusSnapshot, 'chunks' | 'units'> {
   chunkCount: number;
   enabled: boolean;
   revisions: number;
+  unitCount?: number;
 }
 export interface CorpusHit {
   sourceId: string;
@@ -49,6 +62,7 @@ export interface CorpusHit {
   text: string;
   score: number;
   signals: ('keyword' | 'vector' | 'graph')[];
+  context?: { unitId: string; locator: string; text: string; complete: boolean; reason?: string };
 }
 export interface CorpusSearchResult {
   hits: CorpusHit[];

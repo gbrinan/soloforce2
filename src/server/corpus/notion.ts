@@ -1,6 +1,8 @@
 import ky from 'ky';
 import type { CorpusChunk, CorpusProfile } from '../../shared/corpus.js';
 import { chunkText, CorpusError, MAX_SOURCE_BYTES } from './extract.js';
+import { sourceUnit } from './source-reader.js';
+import type { SourceUnit } from '../../shared/corpus.js';
 import type { CorpusInput } from './service.js';
 
 export const NOTION_VERSION = '2026-03-11';
@@ -79,16 +81,36 @@ export class NotionReadonlyProvider {
     const titleProperty = Object.values(before.properties ?? {}).find((v: any) => v?.type === 'title') as Json | undefined;
     const title = richText(titleProperty?.title) || `Notion ${id}`;
     const chunks: CorpusChunk[] = []; const warnings = ['페이지 본문·속성·블록 JSON 스냅샷입니다. 첨부파일 원본, 하위 페이지, 데이터베이스 전체 백업은 포함하지 않습니다.'];
+    const units: SourceUnit[] = [];
+    const add = (text: string, block: Json, cells?: string[], headings: string[] = []) => {
+      if (!text.trim()) return;
+      const unit = sourceUnit(text, `Notion 블록 ${block.id}`, cells ? 'table' : 'text', cells, headings, cells ? 'row_with_header' : 'block');
+      units.push(unit); chunks.push(...chunkText(text, unit.locator, unit.kind).map(chunk => ({ ...chunk, unitId: unit.id })));
+    };
+    const headingsByParent = new Map<string, string[]>();
+    const blockHeadings = new Map<string, string[]>();
     const routes: CorpusProfile['routes'] = [];
     for (const block of blocks) {
+      const parentId = String(block.corpus_parent_id);
+      let headings = headingsByParent.get(parentId);
+      if (!headings) {
+        headings = [...(blockHeadings.get(parentId) ?? [])];
+        headingsByParent.set(parentId, headings);
+      }
       const content = block[block.type] ?? {};
       if (block.type === 'table_row') {
         const cells = Array.isArray(content.cells) ? content.cells.map(richText) : [];
-        chunks.push(...chunkText(cells.join(' | '), `Notion 블록 ${block.id}`, 'table', cells));
+        const parent = blocks.find(item => item.id === block.corpus_parent_id);
+        const header = parent?.table?.has_column_header ? blocks.find(item => item.type === 'table_row' && item.corpus_parent_id === block.corpus_parent_id) : undefined;
+        const headerText = header ? (header.table_row.cells as Json[]).map(richText).join(' | ') : '';
+        add(`${headerText ? `열: ${headerText}\n` : ''}${cells.join(' | ')}`, block, cells, [...headings]);
       } else {
         const text = richText(content.rich_text) || richText(content.caption);
-        if (text) chunks.push(...chunkText(text, `Notion 블록 ${block.id}`));
+        const heading = block.type.match(/^heading_([123])$/);
+        if (heading) { headings.length = Number(heading[1]) - 1; headings.push(text); }
+        if (text) add(text, block, undefined, [...headings]);
       }
+      blockHeadings.set(block.id, [...headings]);
       if (['image', 'pdf'].includes(block.type)) routes.push({ route: 'ocr', status: 'needs_tool', detail: `첨부 원본을 별도로 등록하세요: ${block.id}` });
       if (['audio', 'video'].includes(block.type)) routes.push({ route: 'transcription', status: 'needs_tool', detail: `첨부 원본을 별도로 등록하세요: ${block.id}` });
       if (['file', 'child_page', 'child_database', 'unsupported', 'synced_block'].includes(block.type)) warnings.push(`별도 확인 필요: ${block.type} (${block.id})`);
@@ -102,6 +124,6 @@ export class NotionReadonlyProvider {
     const bytes = Buffer.from(JSON.stringify({ notionVersion: NOTION_VERSION, page: before, blocks }));
     return { provider: 'notion', externalId: id, providerRevision: before.last_edited_time, name: `${title.slice(0, 230)}.json`,
       mime: 'application/json', sourceUrl: `https://www.notion.so/${id.replace(/-/g, '')}`, bytes, labels, backup: 'page_snapshot',
-      extracted: { profile: { format: 'json', mime: 'application/json', evidence: [`notion-page:${id}`, `api:${NOTION_VERSION}`], warnings, routes }, chunks } };
+      extracted: { profile: { format: 'json', mime: 'application/json', evidence: [`notion-page:${id}`, `api:${NOTION_VERSION}`], warnings, routes }, chunks, units } };
   }
 }

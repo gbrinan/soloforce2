@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import ky, { type KyInstance } from "ky";
 import { CorpusError, MAX_SOURCE_BYTES } from './corpus/extract.js';
 import { readBounded } from './corpus/notion.js';
+import { INTAKE_LIMITS } from '../shared/corpus-intake.js';
 import {
   GoogleDriveFileListSchema,
   GoogleTokenResponseSchema,
@@ -40,6 +41,12 @@ export interface GoogleReadonlyProvider {
   fetchIdentity(accessToken: string): Promise<GoogleIdentity>;
   listMetadata(refreshToken: string): Promise<readonly GoogleDriveFile[]>;
   readFile?(refreshToken: string, fileId: string): Promise<GoogleFileContent>;
+  transferFile?(refreshToken: string, fileId: string, sink: GoogleTransferSink): Promise<GoogleTransferMetadata>;
+}
+export interface GoogleTransferMetadata { id: string; name: string; mime: string; bytes: number; revision: string; exported: boolean; md5Checksum?: string }
+export interface GoogleTransferSink {
+  begin(metadata: GoogleTransferMetadata): Promise<number>;
+  write(offset: number, bytes: Buffer): Promise<void>;
 }
 
 export interface GoogleFileContent {
@@ -207,6 +214,56 @@ export class GoogleReadonlyHttpProvider implements GoogleReadonlyProvider {
       if (before.version !== after.version || before.mimeType !== after.mimeType) throw new CorpusError('source_changed_retry', 409);
       if (!format && before.md5Checksum && createHash('md5').update(bytes).digest('hex') !== before.md5Checksum) throw new CorpusError('drive_checksum_mismatch', 409);
       return { id: fileId, name: `${before.name}${format && !before.name.endsWith(format.ext) ? format.ext : ''}`, mime: format?.mime ?? before.mimeType, bytes, revision: before.version, exported: Boolean(format) };
+    } catch (error) {
+      if (error instanceof CorpusError) throw error;
+      throw new CorpusError('drive_content_fetch_failed', 502);
+    }
+  }
+
+  async transferFile(refreshToken: string, fileId: string, sink: GoogleTransferSink): Promise<GoogleTransferMetadata> {
+    if (!/^[a-zA-Z0-9_-]{1,200}$/.test(fileId)) throw new CorpusError('invalid_drive_file_id', 400);
+    const accessToken = await this.#refreshAccessToken(refreshToken);
+    const url = `${this.#options.driveFilesEndpoint}/${encodeURIComponent(fileId)}`;
+    const headers = { authorization: `Bearer ${accessToken}` };
+    type Metadata = { id: string; name: string; mimeType: string; version: string; size?: string; md5Checksum?: string; trashed?: boolean; capabilities?: { canDownload?: boolean } };
+    const metadata = async () => {
+      const file = await this.#http.get(url, { headers, redirect: 'error', searchParams: { fields: 'id,name,mimeType,version,size,md5Checksum,trashed,capabilities(canDownload)', supportsAllDrives: 'true' } }).json<Metadata>();
+      if (file.id !== fileId || !file.name || !file.version || !file.mimeType) throw new CorpusError('invalid_drive_metadata', 502);
+      if (file.trashed || file.capabilities?.canDownload !== true) throw new CorpusError('drive_download_forbidden', 403);
+      return file;
+    };
+    try {
+      const before = await metadata();
+      if (before.mimeType.startsWith('application/vnd.google-apps.')) {
+        // Workspace export has its own provider limit and no byte-range support.
+        const file = await this.readFile(refreshToken, fileId);
+        const meta: GoogleTransferMetadata = { id: file.id, name: file.name, mime: file.mime, bytes: file.bytes.length, revision: file.revision, exported: true };
+        const savedOffset = await sink.begin(meta);
+        if (!Number.isSafeInteger(savedOffset) || savedOffset < 0 || savedOffset > file.bytes.length) throw new CorpusError('intake_offset_invalid', 400);
+        // Exports can differ at the byte level even at one revision. Replay accepted
+        // parts through the sink's hash check before appending a new export's tail.
+        let offset = 0;
+        while (offset < file.bytes.length) { const part = file.bytes.subarray(offset, offset + INTAKE_LIMITS.partBytes); await sink.write(offset, part); offset += part.length; }
+        return meta;
+      }
+      const size = Number(before.size);
+      if (!Number.isSafeInteger(size) || size < 1) throw new CorpusError('invalid_drive_metadata', 502);
+      if (size > INTAKE_LIMITS.originalBytes) throw new CorpusError('intake_original_too_large', 413);
+      const meta: GoogleTransferMetadata = { id: fileId, name: before.name, mime: before.mimeType, bytes: size, revision: before.version, exported: false, md5Checksum: before.md5Checksum };
+      let offset = await sink.begin(meta);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > size) throw new CorpusError('intake_offset_invalid', 400);
+      while (offset < size) {
+        const end = Math.min(size, offset + INTAKE_LIMITS.partBytes) - 1;
+        const response = await this.#http.get(url, { headers: { ...headers, Range: `bytes=${offset}-${end}` }, redirect: 'error', searchParams: { alt: 'media', supportsAllDrives: 'true' } });
+        const range = response.headers.get('content-range');
+        if (!(response.status === 206 && range === `bytes ${offset}-${end}/${size}`) && !(response.status === 200 && offset === 0 && end + 1 === size)) { await response.body?.cancel(); throw new CorpusError('drive_range_not_supported', 502); }
+        const part = await readBounded(response, INTAKE_LIMITS.partBytes);
+        if (part.length !== end - offset + 1) throw new CorpusError('drive_range_incomplete', 502);
+        await sink.write(offset, part); offset += part.length;
+      }
+      const after = await metadata();
+      if (before.version !== after.version || before.mimeType !== after.mimeType || before.size !== after.size || before.md5Checksum !== after.md5Checksum) throw new CorpusError('source_changed_retry', 409);
+      return meta;
     } catch (error) {
       if (error instanceof CorpusError) throw error;
       throw new CorpusError('drive_content_fetch_failed', 502);

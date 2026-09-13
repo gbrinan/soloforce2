@@ -16,9 +16,12 @@ import {
 import { ConnectionIdSchema } from "./reversible-ingest-schema.js";
 import { z } from 'zod';
 import { bodyLimit } from 'hono/body-limit';
-import { CorpusError } from './corpus/extract.js';
+import { CorpusError, hash } from './corpus/extract.js';
 import type { CorpusService } from './corpus/service.js';
-import { CorpusLabelsSchema } from './corpus/routes.js';
+import { CorpusLabelsSchema, getCorpusIntake } from './corpus/routes.js';
+import { fileHash } from './corpus/files.js';
+import { join } from 'node:path';
+import type { CorpusIntake } from '../shared/corpus-intake.js';
 
 type RouteOptions = {
   readonly corpus?: CorpusService;
@@ -48,6 +51,29 @@ export function createGoogleReadonlyRoutes(options: RouteOptions): Hono {
       sourceUrl: `https://drive.google.com/file/d/${file.id}/view`, backup: file.exported ? 'export' : 'original' },
     () => options.service.isConnectionActive(connectionId));
     return c.json({ source }, 201);
+  });
+  app.post('/:connectionId/intake', auth(options, () => ({ kind: 'owner_mutation' })), bodyLimit({ maxSize: 8192 }), async c => {
+    if (!options.corpus) throw new CorpusError('corpus_not_configured', 503);
+    const body = z.object({ fileId: z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/), labels: CorpusLabelsSchema, intakeId: z.string().regex(/^[a-f0-9]{32}$/).optional() }).strict().parse(await c.req.json());
+    const connectionId = c.req.param('connectionId');
+    const intake = getCorpusIntake(options.corpus, source => source.provider !== 'google-drive' || Boolean(source.connectionId && options.service.isConnectionActive(source.connectionId)));
+    let job: CorpusIntake | undefined = body.intakeId ? intake.read(body.intakeId) : undefined;
+    if (job && (job.provider !== 'google-drive' || job.connectionId !== connectionId || job.externalId !== body.fileId || job.state !== 'uploading')) throw new CorpusError('intake_origin_conflict', 409);
+    const file = await options.service.transferFile(connectionId, body.fileId, {
+      begin: async meta => {
+        if (job) {
+          if (job.providerRevision !== meta.revision || job.bytes !== meta.bytes || job.mime !== meta.mime) throw new CorpusError('source_changed_retry', 409);
+        } else job = intake.create({ name: meta.name, bytes: meta.bytes, mime: meta.mime, labels: body.labels }, {
+          provider: 'google-drive', externalId: meta.id, connectionId, providerRevision: meta.revision,
+          sourceUrl: `https://drive.google.com/file/d/${meta.id}/view`, backup: meta.exported ? 'export' : 'original',
+        });
+        return job.uploadedBytes;
+      },
+      write: async (offset, bytes) => { job = await intake.append(job!.id, offset, bytes, hash(bytes)); },
+    });
+    if (!job) throw new CorpusError('drive_content_fetch_failed', 502);
+    if (file.md5Checksum && await fileHash(join(intake.directory(job.id), 'original.bin'), 'md5') !== file.md5Checksum) throw new CorpusError('drive_checksum_mismatch', 409);
+    return c.json({ job: await intake.finish(job.id) }, 201);
   });
 
   app.post(

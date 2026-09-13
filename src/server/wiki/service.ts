@@ -8,6 +8,7 @@ import type { WikiCandidate, WikiJob, WikiJobSummary, WikiPayload, WikiRequest, 
 import { CorpusError, hash } from '../corpus/extract.js';
 import { CorpusStore } from '../corpus/store.js';
 import { callWikiCore, UPSTREAM_COMMIT } from './bridge.js';
+import { unitText } from '../corpus/source-reader.js';
 
 const identifier = z.string().regex(/^[a-f0-9]{64}$/);
 const scopeId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
@@ -16,7 +17,7 @@ export const WikiScopeSchema = z.object({ orgId: scopeId, projectId: scopeId }).
 export const WikiPrepareSchema = z.object({
   scope: WikiScopeSchema, sourceId: identifier, expectedRevision: identifier,
   unitIds: z.array(z.string().min(1).max(200)).min(1).max(500),
-  model: z.string().trim().min(1).max(120), maxChars: z.number().int().min(100).max(24_000).default(12_000),
+  model: z.string().trim().min(1).max(120), maxChars: z.number().int().min(100).max(24_000).default(24_000),
 }).strict();
 const strings = z.array(z.string().min(1).max(24_000)).max(100);
 export const WikiResponseSchema = z.object({ request_id: identifier, results: z.array(z.object({
@@ -35,8 +36,7 @@ export class WikiService {
   private source(id: string): CorpusSnapshot {
     const source = this.corpus.snapshot(identifier.parse(id));
     if (!source || !this.allowed(source) || !this.corpus.isEnabled(id)) throw new CorpusError('wiki_source_unavailable', 404);
-    const original = readFileSync(join(this.corpus.root, source.sourceId, source.revision, 'original.bin'));
-    if (hash(original) !== source.contentHash) throw new CorpusError('wiki_original_changed', 409);
+    if (!this.corpus.verifyOriginal(source)) throw new CorpusError('wiki_original_changed', 409);
     return source;
   }
 
@@ -79,25 +79,27 @@ export class WikiService {
     if (source.revision !== input.expectedRevision) throw new CorpusError('wiki_source_changed', 409);
     const selected = new Set(input.unitIds);
     if (selected.size !== input.unitIds.length) throw new CorpusError('wiki_duplicate_units', 400);
-    const units = source.chunks.filter(chunk => selected.has(chunk.id)).map(chunk => ({ unit_id: chunk.id, locator: chunk.locator, text: chunk.text, ...(chunk.cells ? { cells: chunk.cells } : {}) }));
+    if (!source.units) throw new CorpusError('wiki_source_units_require_reimport', 409);
+    const units = source.units.filter(unit => selected.has(unit.id)).map(unit => ({ unit_id: unit.id, locator: unit.locator, text: unitText(unit) }));
     if (units.length !== selected.size) throw new CorpusError('wiki_unknown_units', 400);
-    if (units.reduce((sum, unit) => sum + unit.text.length, 0) > 240_000) throw new CorpusError('wiki_batch_too_large', 413);
+    if (units.filter(unit => unit.text.length <= input.maxChars).reduce((sum, unit) => sum + unit.text.length, 0) > 240_000) throw new CorpusError('wiki_batch_too_large', 413);
     const existing = existsSync(this.directory(input.scope)) ? readdirSync(this.directory(input.scope)).filter(name => /^[a-f0-9]{64}$/.test(name)) : [];
-    const prepared = await callWikiCore<{ requests: WikiRequest[] }>({ operation: 'prepare', model: input.model, maxChars: input.maxChars,
+    const prepared = await callWikiCore<{ requests: WikiRequest[]; pending_units: { unit_id: string; reason: string }[]; request_bytes: number[]; budget: WikiPayload['budget'] }>({ operation: 'prepare', model: input.model, maxChars: input.maxChars, deferOversized: true,
       source: { source_id: `corpus:${source.sourceId}`, source_revision: source.contentHash,
         org_id: input.scope.orgId, project_id: input.scope.projectId, units,
         structure: { corpus_revision: source.revision, parser_version: source.pipelineVersion, format: source.profile.format,
-          source_name: source.name, context_policy: 'Only supplied units are read. Cell/row text is extracted representation, not approved knowledge.' },
+          source_name: source.name, context_policy: 'Units preserve sections or rows with headings. Search chunks are not knowledge units. Text is extracted representation, not approved knowledge. Unread cross-section dependencies remain unverified.' },
       },
     });
     const afterPrepare = this.source(source.sourceId);
     if (afterPrepare.revision !== source.revision || afterPrepare.contentHash !== source.contentHash) throw new CorpusError('wiki_source_changed', 409);
     const payload: WikiPayload = { schemaVersion: 1, upstreamCommit: UPSTREAM_COMMIT, scope: input.scope,
       source: { sourceId: source.sourceId, revision: source.revision, sha256: source.contentHash, parserVersion: source.pipelineVersion, name: source.name },
-      coverage: { totalUnits: source.chunks.length, selectedUnitIds: units.map(unit => unit.unit_id),
-        omittedUnitIds: source.chunks.filter(chunk => !selected.has(chunk.id)).map(chunk => chunk.id),
+      coverage: { totalUnits: source.units.length, selectedUnitIds: units.map(unit => unit.unit_id),
+        omittedUnitIds: source.units.filter(unit => !selected.has(unit.id)).map(unit => unit.id),
+        pendingUnits: prepared.pending_units,
         pendingRoutes: source.profile.routes.filter(route => route.status !== 'ready').map(route => route.route),
-      }, requests: prepared.requests,
+      }, requests: prepared.requests, requestBytes: prepared.request_bytes, budget: prepared.budget,
     };
     const id = hash(JSON.stringify(payload));
     if (existing.length >= 500 && !existing.includes(id)) throw new CorpusError('wiki_job_limit', 413);
@@ -121,7 +123,7 @@ export class WikiService {
     }
     const completed = new Set(candidates.map(candidate => candidate.requestId));
     return { id, payload, candidates, sourceState: current.revision === payload.source.revision && current.contentHash === payload.source.sha256 ? 'unchanged' : 'changed',
-      state: completed.size === payload.requests.length ? 'candidate_saved' : completed.size ? 'partial' : 'awaiting_response',
+      state: payload.coverage.pendingUnits?.length ? (payload.requests.length ? 'partial' : 'needs_subdivision') : completed.size === payload.requests.length ? 'candidate_saved' : completed.size ? 'partial' : 'awaiting_response',
       semanticReview: 'pending', published: false, driveSync: 'not_configured' };
   }
 

@@ -18,6 +18,7 @@ import {
   GOOGLE_READONLY_SCOPES,
   GoogleProviderError,
   type GoogleReadonlyProvider,
+  type GoogleTransferSink,
 } from "./google-readonly-provider.js";
 import { ConnectionIdSchema, ProjectIdSchema, type IngestManifest, type OperationResult } from "./reversible-ingest-schema.js";
 import { ReversibleIngestStore } from "./reversible-ingest.js";
@@ -197,6 +198,17 @@ export class GoogleReadonlyConnectionService {
     const secret = this.contentCredential(connectionId);
     if (!this.#provider.readFile) throw new CorpusError('drive_content_not_supported', 503);
     const file = await this.#provider.readFile(secret.refreshToken, fileId);
+    if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403);
+    return file;
+  }
+
+  async transferFile(connectionId: string, fileId: string, sink: GoogleTransferSink) {
+    const secret = this.contentCredential(connectionId);
+    if (!this.#provider.transferFile) throw new CorpusError('drive_content_not_supported', 503);
+    const file = await this.#provider.transferFile(secret.refreshToken, fileId, {
+      begin: metadata => { if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403); return sink.begin(metadata); },
+      write: (offset, bytes) => { if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403); return sink.write(offset, bytes); },
+    });
     if (!this.isConnectionActive(connectionId)) throw new CorpusError('connection_inactive', 403);
     return file;
   }

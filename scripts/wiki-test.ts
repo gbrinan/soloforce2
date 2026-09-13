@@ -37,13 +37,13 @@ try {
   const original = Buffer.from('# 가상 자료\n\n초안 금액은 001200원이며, 최종 주문은 사람이 실행한다.\n\n다른 부서 내용은 별도 확인한다.');
   const source = await importer.import({ provider: 'local', externalId: 'synthetic.md', name: 'synthetic.md', mime: 'text/markdown', bytes: original });
   const snapshot = corpus.snapshot(source.sourceId)!;
-  const selected = snapshot.chunks.slice(0, 1).map(chunk => chunk.id);
+  const selected = snapshot.units!.slice(0, 1).map(unit => unit.id);
   const input = { scope, sourceId: source.sourceId, expectedRevision: source.revision, unitIds: selected, model: 'synthetic-host' };
   const job = await service.prepare(input);
   assert.equal(job.payload.source.sha256, snapshot.contentHash);
   assert.equal(job.payload.requests[0].source_revision, snapshot.contentHash);
-  assert.equal(job.payload.requests[0].units[0].locator, snapshot.chunks[0].locator);
-  assert.deepEqual(job.payload.coverage.omittedUnitIds, snapshot.chunks.slice(1).map(chunk => chunk.id));
+  assert.equal(job.payload.requests[0].units[0].locator, snapshot.units![0].locator);
+  assert.deepEqual(job.payload.coverage.omittedUnitIds, snapshot.units!.slice(1).map(unit => unit.id));
   assert.equal((await service.prepare(input)).id, job.id);
   assert.notEqual((await service.prepare({ ...input, model: 'other-host' })).id, job.id);
   assert.deepEqual(readFileSync(join(corpus.root, source.sourceId, source.revision, 'original.bin')), original);
@@ -76,7 +76,7 @@ try {
   const zip = new AdmZip(service.backup(scope, job.id));
   const entry = zip.getEntries().find(entry => entry.entryName.endsWith('/C0001.json'))!;
   const knowledge = JSON.parse(entry.getData().toString('utf8'));
-  assert.equal(knowledge.lifecycle, 'candidate'); assert.equal(knowledge.provenance.locator, snapshot.chunks[0].locator);
+  assert.equal(knowledge.lifecycle, 'candidate'); assert.equal(knowledge.provenance.locator, snapshot.units![0].locator);
   assert.equal(knowledge.provenance.source_revision, snapshot.contentHash);
   const restored = new WikiService(join(root, 'wiki'), corpus, () => authorized);
   assert.equal(restored.read(scope, job.id).candidates.length, 2);
@@ -134,9 +134,24 @@ try {
   sheet.addRow(['코드', '조건']); sheet.addRow(['0012', '사람 승인 후 발송']);
   const table = await importer.import({ provider: 'local', externalId: 'table.xlsx', name: 'table.xlsx', mime: '', bytes: Buffer.from(await book.xlsx.writeBuffer()) });
   const tableSnapshot = corpus.snapshot(table.sourceId)!;
-  const tableJob = await service.prepare({ ...input, sourceId: table.sourceId, expectedRevision: table.revision, unitIds: tableSnapshot.chunks.map(chunk => chunk.id) });
-  assert.ok(tableJob.payload.requests.some(request => request.units.some(unit => unit.text.includes('0012') && unit.cells?.includes('0012'))));
+  const tableJob = await service.prepare({ ...input, sourceId: table.sourceId, expectedRevision: table.revision, unitIds: tableSnapshot.units!.map(unit => unit.id) });
+  assert.ok(tableJob.payload.requests.some(request => request.units.some(unit => unit.text.includes('0012') && unit.text.includes('열: 코드 | 조건'))));
+  assert.ok(tableJob.payload.requests.every(request => request.units.every(unit => unit.cells === undefined)));
   console.log('PASS spreadsheet values and structural source units survive handoff');
+
+  const boundarySource = await importer.import({ provider: 'local', externalId: 'boundary.md', name: 'boundary.md', mime: '', bytes: Buffer.from('# 발송\n자동 발송 허용.\n'+ '설명입니다. '.repeat(250) + '\n단, 대외 발송은 사람이 직접 한다.') });
+  const boundarySnapshot = corpus.snapshot(boundarySource.sourceId)!;
+  const boundaryJob = await service.prepare({ ...input, sourceId: boundarySource.sourceId, expectedRevision: boundarySource.revision, unitIds: boundarySnapshot.units!.map(unit => unit.id) });
+  assert.ok(boundarySnapshot.chunks.length > 1);
+  assert.equal(boundaryJob.payload.requests[0].units.length, 1);
+  assert.ok(boundaryJob.payload.requests[0].units[0].text.includes('단, 대외 발송은 사람이 직접 한다.'));
+  assert.equal(boundaryJob.payload.requestBytes![0], Buffer.byteLength(JSON.stringify(boundaryJob.payload.requests[0])));
+  assert.ok(boundaryJob.payload.requestBytes!.every(size => size <= 98304));
+  const deferred = await service.prepare({ ...input, sourceId: boundarySource.sourceId, expectedRevision: boundarySource.revision, unitIds: boundarySnapshot.units!.map(unit => unit.id), maxChars: 100 });
+  assert.equal(deferred.state, 'needs_subdivision'); assert.equal(deferred.payload.requests.length, 0);
+  assert.equal(deferred.payload.coverage.pendingUnits?.length, 1);
+  await assert.rejects(service.prepare({ ...input, unitIds: snapshot.chunks.map(chunk => chunk.id) }), expectCode('wiki_unknown_units'));
+  console.log('PASS full-section exception reaches LLM, complete request byte count, oversized section deferred, search chunks rejected as knowledge units');
 
   delete process.env.GOOGLE_CLIENT_ID; delete process.env.GOOGLE_CLIENT_SECRET; delete process.env.MYCREW_REQUIRE_SSO;
   const app = new Hono(); app.route('/api/wiki', createWikiRoutes({ service }));

@@ -3,10 +3,11 @@ import ExcelJS from 'exceljs';
 import { createHash } from 'node:crypto';
 import { extname, dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
-import type { CorpusChunk, CorpusFormat, CorpusProfile } from '../../shared/corpus.js';
+import type { CorpusChunk, CorpusFormat, CorpusProfile, SourceUnit } from '../../shared/corpus.js';
+import { markdownSections, sourceUnit } from './source-reader.js';
 
 export const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
-export const PIPELINE_VERSION = 'corpus-1';
+export const PIPELINE_VERSION = 'corpus-2';
 const MAX_TEXT = 2_000_000;
 const MAX_CHUNKS = 10_000;
 const extensions: Record<string, CorpusFormat> = {
@@ -22,17 +23,27 @@ export class CorpusError extends Error {
 }
 export function hash(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex'); }
 
-function safeZip(bytes: Buffer): AdmZip {
+export interface ExtractionOptions {
+  maxSourceBytes?: number;
+  maxExpandedBytes?: number;
+  maxPdfPages?: number;
+  startUnit?: number;
+  unitLimit?: number;
+  onUnit?: (unit: SourceUnit, ordinal: number) => void;
+}
+class ExtractionPaused extends Error {}
+
+function safeZip(bytes: Buffer, maxExpandedBytes = 64 * 1024 * 1024): AdmZip {
   const zip = new AdmZip(bytes);
   const entries = zip.getEntries();
-  if (entries.length > 5000 || entries.reduce((n, e) => n + e.header.size, 0) > 64 * 1024 * 1024) {
+  if (entries.length > 5000 || entries.reduce((n, e) => n + e.header.size, 0) > maxExpandedBytes) {
     throw new CorpusError('archive_expansion_limit', 413);
   }
   return zip;
 }
 
-export function classify(name: string, mime: string, bytes: Buffer): CorpusProfile {
-  if (bytes.length > MAX_SOURCE_BYTES) throw new CorpusError('file_too_large', 413);
+export function classify(name: string, mime: string, bytes: Buffer, options: ExtractionOptions = {}): CorpusProfile {
+  if (bytes.length > (options.maxSourceBytes ?? MAX_SOURCE_BYTES)) throw new CorpusError('file_too_large', 413);
   const extension = extname(name).toLowerCase();
   const declared = extensions[extension] ?? 'unknown';
   let format: CorpusFormat = declared;
@@ -42,7 +53,7 @@ export function classify(name: string, mime: string, bytes: Buffer): CorpusProfi
   if (sig.subarray(0, 5).toString() === '%PDF-') { format = 'pdf'; evidence.push('signature:PDF'); }
   else if (sig.subarray(0, 2).toString() === 'PK') {
     try {
-      const zip = safeZip(bytes);
+      const zip = safeZip(bytes, options.maxExpandedBytes);
       format = zip.getEntry('word/document.xml') ? 'docx'
         : zip.getEntry('xl/workbook.xml') ? 'xlsx'
         : zip.getEntry('ppt/presentation.xml') ? 'pptx'
@@ -113,12 +124,21 @@ function xmlText(xml: string): string {
     })).join(' ');
 }
 
-export async function extract(name: string, mime: string, bytes: Buffer, labels: string[] = []): Promise<{ profile: CorpusProfile; chunks: CorpusChunk[] }> {
-  const profile = classify(name, mime, bytes);
+export async function extract(name: string, mime: string, bytes: Buffer, labels: string[] = [], options: ExtractionOptions = {}): Promise<{ profile: CorpusProfile; chunks: CorpusChunk[]; units: SourceUnit[]; progress: { cursor: number; complete: boolean } }> {
+  const profile = classify(name, mime, bytes, options);
   const chunks: CorpusChunk[] = [];
-  const add = (text: string, locator: string, kind: 'text' | 'table' = 'text', cells?: string[]) => {
-    chunks.push(...chunkText(text, locator, kind, cells));
+  const units: SourceUnit[] = [];
+  let seen = 0; let cursor = options.startUnit ?? 0; let complete = true;
+  const add = (text: string, locator: string, kind: 'text' | 'table' = 'text', cells?: string[], headingPath: string[] = [], contextStatus?: SourceUnit['contextStatus']) => {
+    if (!text.trim()) return;
+    if (seen++ < (options.startUnit ?? 0)) return;
+    if (units.length >= (options.unitLimit ?? Number.MAX_SAFE_INTEGER)) throw new ExtractionPaused();
+    const unit = sourceUnit(text, locator, kind, cells, headingPath, contextStatus);
+    const derived = chunkText(text, locator, kind).map(chunk => ({ ...chunk, unitId: unit.id }));
+    chunks.push(...derived);
     if (chunks.length > MAX_CHUNKS) throw new CorpusError('chunk_limit', 413);
+    units.push(unit); cursor = seen;
+    options.onUnit?.(unit, cursor);
   };
   const table = (rows: string[][], locator: string) => {
     const header = rows[0]?.join(' | ') ?? '';
@@ -136,7 +156,8 @@ export async function extract(name: string, mime: string, bytes: Buffer, labels:
         break;
       }
       case 'text': case 'markdown': {
-        const text = decode(bytes); add(text, '본문');
+        const text = decode(bytes);
+        for (const section of markdownSections(text)) add(section.text, `본문 ${section.line}행`, 'text', undefined, section.headingPath, 'section');
         // 혼합 문서: 본문 색인과 별도로 Markdown 표의 행/열을 유지한다.
         const blocks = text.match(/(?:^\s*\|.+\|\s*\r?\n){2,}/gm) ?? [];
         for (const [i, block] of blocks.entries()) {
@@ -145,7 +166,7 @@ export async function extract(name: string, mime: string, bytes: Buffer, labels:
         break;
       }
       case 'xlsx': {
-        safeZip(bytes);
+        safeZip(bytes, options.maxExpandedBytes);
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);
         let cellCount = 0;
@@ -166,11 +187,23 @@ export async function extract(name: string, mime: string, bytes: Buffer, labels:
         break;
       }
       case 'docx': case 'pptx': case 'hwpx': {
-        const zip = safeZip(bytes);
+        const zip = safeZip(bytes, options.maxExpandedBytes);
+        const media = zip.getEntries().filter(entry => /(?:^|\/)(?:media|BinData)\//i.test(entry.entryName) && !entry.isDirectory).length;
+        if (media) profile.routes.push({ route: 'ocr', status: 'needs_tool', detail: `삽입 매체 ${media}개는 원본에 보존했습니다. 내용 판독은 별도 처리입니다.` });
         const pattern = profile.format === 'docx' ? /^word\/document.xml$/ : profile.format === 'pptx' ? /^ppt\/slides\/slide\d+.xml$/ : /^Contents\/section\d+.xml$/;
         for (const entry of zip.getEntries().filter(e => pattern.test(e.entryName)).sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true }))) {
           const xml = entry.getData().toString('utf8');
-          add(xmlText(xml.replace(/<(?:w:tbl|a:tbl|hp:tbl)(?:\s[^>]*)?>[\s\S]*?<\/(?:w:tbl|a:tbl|hp:tbl)>/g, '')), entry.entryName);
+          const body = xml.replace(/<(?:w:tbl|a:tbl|hp:tbl)(?:\s[^>]*)?>[\s\S]*?<\/(?:w:tbl|a:tbl|hp:tbl)>/g, '');
+          if (profile.format === 'docx') {
+            let paragraphs: string[] = []; let headings: string[] = []; let first = 1;
+            const flush = () => { add(paragraphs.join('\n'), `${entry.entryName} 문단${first}`, 'text', undefined, [...headings], 'section'); paragraphs = []; };
+            [...body.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)].forEach((p, i) => {
+              const text = xmlText(p[0]); const style = p[0].match(/<w:pStyle\b[^>]*w:val="(?:Heading|heading|제목)\s*([1-6])"/);
+              if (style) { flush(); headings = headings.slice(0, Number(style[1]) - 1); headings[Number(style[1]) - 1] = text; first = i + 1; }
+              paragraphs.push(text);
+            });
+            flush();
+          } else add(xmlText(body), entry.entryName, 'text', undefined, [], profile.format === 'pptx' ? 'page' : 'section');
           const tables = [...xml.matchAll(/<(?:w:tbl|a:tbl|hp:tbl)(?:\s[^>]*)?>[\s\S]*?<\/(?:w:tbl|a:tbl|hp:tbl)>/g)];
           tables.forEach((match, i) => {
             const rows = [...match[0].matchAll(/<(?:w:tr|a:tr|hp:tr)(?:\s[^>]*)?>[\s\S]*?<\/(?:w:tr|a:tr|hp:tr)>/g)].map(r =>
@@ -190,14 +223,14 @@ export async function extract(name: string, mime: string, bytes: Buffer, labels:
           standardFontDataUrl: join(assets, 'standard_fonts') + '/', cMapUrl: join(assets, 'cmaps') + '/', cMapPacked: true });
         try {
           const document = await task.promise;
-          if (document.numPages > 300) throw new CorpusError('pdf_page_limit', 413);
+          if (document.numPages > (options.maxPdfPages ?? 300)) throw new CorpusError('pdf_page_limit', 413);
           let missing = 0;
           for (let n = 1; n <= document.numPages; n++) {
             const page = await document.getPage(n);
             const content = await page.getTextContent();
             const text = content.items.map(item => 'str' in item ? `${item.str}${item.hasEOL ? '\n' : ' '}` : '').join('');
             if (text.trim().length < 10) missing++;
-            add(text, `PDF ${n}쪽`); page.cleanup();
+            add(text, `PDF ${n}쪽`, 'text', undefined, [], 'page'); page.cleanup();
           }
           if (missing) profile.routes.push({ route: 'ocr', status: 'needs_tool', detail: `${missing}쪽에 추출 가능한 텍스트가 부족합니다.` });
           profile.warnings.push('PDF 표의 셀 경계는 확정하지 않습니다. 숫자와 표 구조는 원본 대조가 필요합니다.');
@@ -209,14 +242,19 @@ export async function extract(name: string, mime: string, bytes: Buffer, labels:
       default: profile.routes.push({ route: 'review', status: 'needs_review', detail: '지원하지 않는 형식입니다. 변환한 파일을 다시 등록하세요.' });
     }
   } catch (error) {
+    if (error instanceof ExtractionPaused) { complete = false; }
+    else {
     if (error instanceof CorpusError && error.status === 413) throw error;
     chunks.length = 0;
+    units.length = 0;
     profile.routes.push({ route: 'review', status: 'needs_review', detail: error instanceof CorpusError ? error.code : '파싱 실패 또는 암호화된 문서입니다.' });
+    if (options.onUnit) throw error; // The worker must not finalize a partially failed parse.
+    }
   }
   if (chunks.some(c => c.kind === 'text')) profile.routes.push({ route: 'text', status: 'ready', detail: '원문 위치를 포함한 본문 검색' });
   if (chunks.some(c => c.kind === 'table')) profile.routes.push({ route: 'table', status: 'ready', detail: '행·열 및 원래 값 보존' });
   if (labels.length && chunks.length) profile.routes.push({ route: 'graph', status: 'ready', detail: '사용자가 지정한 업무 분류로 자료 간 연결' });
   if (!chunks.length && !profile.routes.length) profile.routes.push({ route: 'review', status: 'needs_review', detail: '추출된 내용이 없습니다.' });
   if (chunks.reduce((n, c) => n + c.text.length, 0) > MAX_TEXT * 2) throw new CorpusError('extracted_text_limit', 413);
-  return { profile, chunks };
+  return { profile, chunks, units, progress: { cursor, complete } };
 }

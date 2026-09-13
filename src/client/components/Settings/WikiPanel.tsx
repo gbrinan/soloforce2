@@ -11,6 +11,7 @@ const errors: Record<string, string> = {
   wiki_source_changed: '요청을 만든 뒤 원본 버전이 바뀌었습니다. 최신 자료에서 새 요청을 만드세요.',
   wiki_original_changed: '보존한 원본 파일의 해시가 일치하지 않습니다. 원본과 백업을 확인하세요.',
   wiki_source_unavailable: '이 자료는 접근할 수 없거나 검색에서 제외되었습니다.',
+  wiki_source_units_require_reimport: '이전 추출판입니다. 자료를 다시 가져오면 절·표 단위로 분석할 수 있습니다.',
   wiki_artifact_changed: '저장한 후보 또는 요청이 변경되었습니다. 백업과 대조하세요.',
   wiki_batch_too_large: '한 번에 최대 500개 단위, 본문 24만 자까지 준비할 수 있습니다. 범위를 줄이세요.',
   wiki_busy_retry: '다른 Wiki 요청을 처리 중입니다. 잠시 후 다시 시도하세요.',
@@ -43,6 +44,7 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
   const [requestId, setRequestId] = useState<string | null>(null);
   const [response, setResponse] = useState('');
   const [page, setPage] = useState(0);
+  const units = snapshot.units ?? [];
   const scopeReady = [orgId, projectId].every(value => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(value));
   useEffect(() => {
     let live = true;
@@ -64,7 +66,8 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
   const scopeQuery = new URLSearchParams({ orgId: job?.payload.scope.orgId ?? orgId, projectId: job?.payload.scope.projectId ?? projectId }).toString();
   return <Paper p="md" withBorder><Stack gap="sm">
     <Group justify="space-between"><Text fw={600}>{snapshot.name} · LLM Wiki 후보</Text><Button variant="subtle" size="xs" onClick={close}>닫기</Button></Group>
-    <Text size="sm">자료에서 분석할 부분을 고른 뒤 현재 사용하는 LLM에 요청하세요. 응답의 인용과 누락을 검사해 후보로 보존합니다. 의미 검토와 정본 반영, Drive 저장은 별도 단계입니다.</Text>
+    <Text size="sm">절·페이지·표 행을 골라 현재 사용하는 LLM에 요청하세요. 제목과 표 헤더를 함께 전달하며, 큰 단위는 잘라내지 않고 보류합니다. 의미 검토와 정본 반영, Drive 저장은 별도 단계입니다.</Text>
+    {!snapshot.units && <Alert color="yellow">구조 단위가 없는 이전 추출판입니다. 자료를 다시 가져온 뒤 후보를 만드세요. 기존 원본과 후보는 유지됩니다.</Alert>}
     {error && <Alert color="red" role="alert">{error}</Alert>}
     {notice && <Alert color="teal" role="status">{notice}</Alert>}
     <Group grow>
@@ -72,11 +75,11 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
       <TextInput label="프로젝트 ID" description="예: training-2026. 기존 ID가 있으면 유지하세요." value={projectId} disabled={busy} onChange={event => { setProjectId(event.currentTarget.value); resetScope(); }} />
     </Group>
     <TextInput label="분석에 사용할 모델 표기" description="현재 사용할 LLM의 모델·설정을 적습니다. 이 화면에서 유료 API를 호출하지 않습니다." value={model} disabled={busy} onChange={event => setModel(event.currentTarget.value)} maxLength={120} />
-    <Group><Text size="sm">분석 범위: {selected.length} / {snapshot.chunks.length}개</Text>
-      <Button size="xs" variant="light" disabled={busy || snapshot.chunks.length > 500} onClick={() => { setSelected(snapshot.chunks.map(chunk => chunk.id)); setScopeConfirmed(false); }}>이 자료 전체 선택</Button>
+    <Group><Text size="sm">분석 범위: {selected.length} / {units.length}개 구조 단위</Text>
+      <Button size="xs" variant="light" disabled={busy || units.length > 500} onClick={() => { setSelected(units.map(unit => unit.id)); setScopeConfirmed(false); }}>이 자료 전체 선택</Button>
       <Button size="xs" variant="subtle" disabled={busy} onClick={() => { setSelected([]); setScopeConfirmed(false); }}>선택 해제</Button></Group>
     <ScrollArea.Autosize mah={260}><Stack gap="xs">
-      {snapshot.chunks.slice(page * 30, (page + 1) * 30).map(chunk => <div key={chunk.id}>
+      {units.slice(page * 30, (page + 1) * 30).map(chunk => <div key={chunk.id}>
         <Checkbox label={chunk.locator} checked={selected.includes(chunk.id)} disabled={busy} onChange={event => {
           const checked = event.currentTarget.checked;
           setSelected(previous => checked ? [...previous, chunk.id] : previous.filter(id => id !== chunk.id)); setScopeConfirmed(false);
@@ -84,7 +87,7 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
         <details><summary>원문 추출 내용 펼치기</summary><Text size="xs" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{chunk.text}</Text></details>
       </div>)}
     </Stack></ScrollArea.Autosize>
-    {snapshot.chunks.length > 30 && <Group><Button size="xs" variant="subtle" disabled={page === 0} onClick={() => setPage(page - 1)}>이전</Button><Text size="xs">{page + 1} / {Math.ceil(snapshot.chunks.length / 30)}</Text><Button size="xs" variant="subtle" disabled={(page + 1) * 30 >= snapshot.chunks.length} onClick={() => setPage(page + 1)}>다음</Button></Group>}
+    {units.length > 30 && <Group><Button size="xs" variant="subtle" disabled={page === 0} onClick={() => setPage(page - 1)}>이전</Button><Text size="xs">{page + 1} / {Math.ceil(units.length / 30)}</Text><Button size="xs" variant="subtle" disabled={(page + 1) * 30 >= units.length} onClick={() => setPage(page + 1)}>다음</Button></Group>}
     <Checkbox label="선택한 부분이 위 기업·프로젝트의 자료인지 확인했습니다." checked={scopeConfirmed} disabled={busy} onChange={event => setScopeConfirmed(event.currentTarget.checked)} />
     <Group>
       <Button disabled={busy || !available || !scopeReady || !scopeConfirmed || !model.trim() || !selected.length || selected.length > 500} onClick={() => void run(async () => {
@@ -101,12 +104,13 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
     })}>작업 {saved.id.slice(0, 10)} · 후보 응답 {saved.candidateCount}개 · {saved.sourceState === 'changed' ? '원본 변경됨' : '원본 판 일치'}</Button>)}
     {job && <Stack gap="sm">
       <Group><Badge color="yellow">의미 검토 대기</Badge><Text size="xs">요청 {job.payload.requests.length}개 · 후보 응답 {job.candidates.length}개 · 미선택 {job.payload.coverage.omittedUnitIds.length}개</Text></Group>
+      {!!job.payload.coverage.pendingUnits?.length && <Alert color="yellow">{job.payload.coverage.pendingUnits.length}개 구조 단위가 입력 한도를 넘어 보류됐습니다. 해당 절·표의 범위를 다시 나눠야 하며, 이 작업을 자료 전체 분석 완료로 사용하지 마세요.</Alert>}
       {job.payload.coverage.pendingRoutes.length > 0 && <Alert color="yellow">추가 처리 대상: {job.payload.coverage.pendingRoutes.join(', ')}. 읽지 않은 이미지·첨부·음성은 분석 완료에 포함하지 않습니다.</Alert>}
       {job.sourceState === 'changed' && <Alert color="yellow">원본이 변경된 이전 작업입니다. 새 응답을 저장하려면 최신 자료에서 다시 준비하세요.</Alert>}
       <Select label="LLM에 전달할 요청" data={job.payload.requests.map((request, index) => ({ value: request.request_id, label: `요청 ${index + 1} · ${request.units.length}개 단위` }))} value={requestId} onChange={value => { setRequestId(value); setResponse(''); }} />
-      {currentRequest && <details><summary>분석 요청 JSON 펼치기</summary><Textarea label="분석 요청 JSON" readOnly value={JSON.stringify(currentRequest, null, 2)} autosize minRows={4} maxRows={10} /></details>}
+      {currentRequest && <details><summary>분석 요청 JSON 펼치기</summary><Textarea label="분석 요청 JSON" readOnly value={JSON.stringify(currentRequest)} autosize minRows={4} maxRows={10} /></details>}
       <Group><Button variant="light" disabled={!currentRequest} onClick={() => void run(async () => {
-        await navigator.clipboard.writeText(JSON.stringify(currentRequest, null, 2)); setNotice('요청 JSON을 복사했습니다. 사용 중인 LLM에 전달하고 JSON 응답을 받아오세요.');
+        await navigator.clipboard.writeText(JSON.stringify(currentRequest)); setNotice('요청 JSON을 복사했습니다. 사용 중인 LLM에 전달하고 JSON 응답을 받아오세요. 모델의 실제 입력 한도는 별도로 확인하세요.');
       })}>분석 요청 복사</Button>
         <Button component="a" variant="subtle" href={`/api/wiki/jobs/${job.id}/backup?${scopeQuery}`} download>요청·후보 백업</Button></Group>
       <Textarea label="LLM 응답 JSON" description="request_id와 results가 있는 JSON 객체를 붙여넣으세요. 코드 블록 표시는 제외합니다." minRows={5} autosize maxRows={14} value={response} onChange={event => setResponse(event.currentTarget.value)} disabled={busy} />

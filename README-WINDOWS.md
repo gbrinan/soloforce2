@@ -2,7 +2,7 @@
 
 > **문서 역할**: Windows 기존 설치의 Git 업데이트·환경 설정 이전과 WSL2 첫 설치 안내서. 사용법은 [README-USER.md](README-USER.md), 개발·운영 정보는 [README.md](README.md).
 
-> 작성: 2026-06-05 | Git 업데이트·자료 수집 안내 추가: 2026-09-06 | 대상: Windows 사용자
+> 작성: 2026-06-05 | 원본 접수·구조 문맥 안내 갱신: 2026-09-13 | 대상: Windows 사용자
 
 ---
 
@@ -103,6 +103,14 @@ Start-Process 'http://localhost:3456'
 
 WSL 설치는 Ubuntu 터미널의 실제 소스 폴더에서 Git 업데이트, `.env` 병합, 설치·빌드·테스트·실행 순서로 진행합니다. `npm.cmd` 대신 `npm`을 사용하고 각 명령이 성공한 뒤 다음으로 진행하세요. Windows Node의 `node_modules`와 혼용하지 않습니다.
 
+### 큰 원본·구조 문맥 기능 확인
+
+이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `4c876bbecd0f727386c792976dee21479328cac1`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
+
+`test:corpus`는 새 큰 원본 검사도 포함합니다. 합성 파일을 로컬 파일 탭에서 보관하고 **분석 시작 → 잠시 멈춤 → 분석 이어가기**를 확인합니다. 1,200자 뒤에 예외 문장이 있는 절을 검색해 **절·표의 문맥 함께 읽기**에 예외가 포함되는지 확인하세요. `corpus-1` 기존 자료는 보존 원본을 재등록해야 새 Wiki 준비와 Ask 문맥 확장을 사용할 수 있습니다.
+
+Windows에서는 프로세스 재시작 후 재개와 원본 다운로드 해시도 확인합니다. Mac에서 통과한 검사를 Windows에서 통과했다고 간주하지 않습니다. 이 기능에 새 클라우드 계정이나 유료 서비스 설정은 필요하지 않습니다.
+
 ### Windows Codex에 요청하기
 
 아래 문구에 실제 `.env` 위치를 넣어 기존 프로젝트를 연 Codex에 전달합니다.
@@ -110,7 +118,7 @@ WSL 설치는 Ubuntu 터미널의 실제 소스 폴더에서 Git 업데이트, `
 ```text
 이 Windows PC의 Soloforce2를 Git으로 업데이트하고 실행까지 확인해줘.
 README-WINDOWS.md의 '기존 설치: Git 업데이트와 Mac의 .env 이전'과
-config/corpus/README.md를 기준으로 진행해줘.
+config/corpus/README.md와 docs/corpus-source-reader.md를 기준으로 진행해줘.
 Mac에서 옮긴 .env 위치: [실제 Windows 파일 경로]
 실제 실행 소스 폴더와 Windows Node/WSL 방식을 먼저 확인하고 유지해줘.
 기존 코드 변경·.env·개인 자료를 보존하고, 원격과 브랜치를 확인한 뒤
@@ -118,8 +126,10 @@ git pull --ff-only로 업데이트해줘. 충돌이나 분기 차이는 원인�
 필요한 .env 항목과 경로만 병합하고 비밀 값은 출력·커밋·업로드하지 마.
 Node 24 환경에서 의존성 설치, build, test:corpus,
 test:google-readonly-connection, test:wiki를 실행하고 실제 서버를 재시작해줘.
+원격에 구조 문맥 변경이 없다면 업데이트 완료라고 하지 말고 적용 상태를 알려줘.
 IngesTiger에 필요한 Python 3 실행 경로도 확인해줘.
 health·설정 화면·가상 문서 등록/분류/검색/백업까지 확인해줘.
+큰 원본의 접수·분석 재개와 1,200자 밖 예외의 전체 문맥도 검증해줘.
 Google 로그인·권한·약관 동의는 내가 진행할 화면을 알려줘.
 실행 폴더, 적용 커밋, 테스트 결과, 접속 URL, 남은 사용자 동작을 보고해줘.
 ```

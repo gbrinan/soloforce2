@@ -20,7 +20,7 @@ def main():
     if operation == 'probe':
         return {'python': sys.version.split()[0], 'schemaVersion': core.VERSION}
     if operation == 'prepare':
-        return core.prepare(body['source'], body['model'], body['maxChars'])
+        return core.prepare(body['source'], body['model'], body['maxChars'], defer_oversized=body.get('deferOversized', False))
     if operation == 'build':
         with tempfile.TemporaryDirectory(prefix='ingestiger-candidate-') as temporary:
             output = Path(temporary) / 'candidate'

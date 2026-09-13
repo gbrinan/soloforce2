@@ -10,7 +10,7 @@
 
 v1 작성 당시 코드 대조 기준은 Soloforce2 `27fe7bb1e33d604f5a20e0f666a2ed90c51272b2`와 그 위의 로컬 후보 어댑터 커밋 `a7b54a378c100b73a30a3db9541951e80aef4bdb`, IngesTiger `dd10e86859d16c3170f6075f2b5b19b1438baceb`입니다. 실행 경로 중심 조사이며 저장소 전체의 전수 검토는 아닙니다. 후보 어댑터는 로컬에 있고 원격 main에는 반영되지 않았습니다.
 
-현재 로컬 실행 기준은 Soloforce2 `fe427d67267f4f49f63e7641274fa7730807994d`와 고정 IngesTiger `4f9305d227f4638ee8d03d96a638f12ba6703893`입니다. 이 코드는 후보 생성·검증까지 제공하며 아래 온톨로지 실행·평가는 후속 구현입니다.
+초기 설계 대조 기준은 Soloforce2 `fe427d67267f4f49f63e7641274fa7730807994d`였습니다. 현재 구조 읽기 구현은 `codex/ingestiger-wiki-adapter`와 고정 IngesTiger `4c876bbecd0f727386c792976dee21479328cac1`입니다. 이 코드는 후보 생성·검증까지 제공하며 아래 온톨로지 실행·평가는 후속 구현입니다.
 
 **공유 세션을 반영한 결정**
 
@@ -87,7 +87,7 @@ flowchart TD
 | PPTX·Keynote·큰 자료 | 컨테이너 목록, 슬라이드 순서, 노트·매체·도표 존재, 읽은 범위 | 필요한 슬라이드만 변환·분석. 미지원 변환과 용량 초과는 보류 |
 | 암호화·손상·미지원 파일 | 원본 식별자, 실패 이유, 해결에 필요한 조건 | 원본 보존 후 pending/quarantine. 읽지 않은 내용을 추정하지 않음 |
 
-현재 Soloforce2 파서는 원본 20 MiB 제한과 1,200자 청크를 사용합니다. 이 청크를 그대로 논리적 지식 단위로 확정하지 않습니다. 후속 `SourceReader`가 제목·표 헤더·이웃 문단을 연결한 구조 단위를 만들고, 검색 청크와 의미 분석 단위를 따로 둡니다. 큰 발표자료는 이 제한을 무조건 늘리는 대신 별도 inventory·선택 변환 경로를 먼저 둡니다.
+구조 읽기 구현판은 일반 파서의 20 MiB 경로와 별도로 원본 최대 512 MiB의 분할 접수·진행 위치 보존을 제공합니다. `SourceUnit`에 전체 절·슬라이드·표 행과 제목·헤더를 보관하고, 1,200자 검색 청크는 그 단위를 참조합니다. Wiki 준비에는 구조 단위를 전달하며 예산을 넘는 단위는 자르지 않고 보류합니다. Ask는 검색 후 부모 단위를 펼쳐 읽습니다. 이웃 절·표 밖 각주·Notion의 다른 블록까지 논리적으로 결합하는 단계는 미구현입니다. [구현 범위와 한도](corpus-source-reader.md)를 기준으로 해석하세요.
 
 기업·프로젝트는 등록 ID를 선택합니다. 여러 기업이 섞인 문서는 단위별 소유 범위를 나누며, 불명확하면 미지정으로 남깁니다. 앞서 선택한 범위는 후속 작업에 재사용하고 실제로 범위가 달라졌을 때만 다시 확인합니다.
 
@@ -103,7 +103,7 @@ flowchart TD
 | 검색·그래프·벡터 | 지정된 Wiki/source 판에서 만든 색인과 관계 투영 | 탐색과 정렬. 지식 승인 권한은 없음 |
 | Drive·Notion의 결과 표시 | 완성 snapshot의 복제 또는 검토용 뷰 | 원본 연결·보관·표시. 별개의 current를 편집하지 않음 |
 
-기존 IngesTiger [데이터 계약](../vendor/ingestiger/4f9305d227f4638ee8d03d96a638f12ba6703893/skills/ingestiger/references/contracts.md)과 [저장 계약](../vendor/ingestiger/4f9305d227f4638ee8d03d96a638f12ba6703893/skills/ingestiger/references/storage.md)을 확장합니다. 공통 schema·의미 검토·commit 로직은 IngesTiger upstream에서 한 번 정의하고 호스트가 그 버전을 고정해 호출합니다. Soloforce2에 별도 의미 엔진을 복제하지 않습니다. 현재 upstream에 없는 commit 엔진은 새 구현이 필요합니다.
+기존 IngesTiger [데이터 계약](../vendor/ingestiger/4c876bbecd0f727386c792976dee21479328cac1/skills/ingestiger/references/contracts.md)과 [저장 계약](../vendor/ingestiger/4c876bbecd0f727386c792976dee21479328cac1/skills/ingestiger/references/storage.md)을 확장합니다. 공통 schema·의미 검토·commit 로직은 IngesTiger upstream에서 한 번 정의하고 호스트가 그 버전을 고정해 호출합니다. Soloforce2에 별도 의미 엔진을 복제하지 않습니다. 현재 upstream에 없는 commit 엔진은 새 구현이 필요합니다.
 
 **지식·변경·사용 이력의 최소 계약**
 
@@ -443,3 +443,8 @@ principal·승인자·허용 저장 경로는 서버가 채웁니다. MCP/CLI/HT
 ## 원본·역할·코드 정리 반영
 
 후속 로컬 정리에서 IngesTiger `4f9305d227f4638ee8d03d96a638f12ba6703893` (`1.0.0-draft.2`)를 고정했다. 역할·절차·데이터·전달 계약을 합치고 지식 후보의 선택 kind, 허용 필드 검사, 입력 근거에 따른 이미지/시트 역할, UTF-8 파일 처리를 반영했다. 위 코드 대조 기준은 설계 당시 이력으로 보존한다. 정본 승격·Drive 자동 동기화·EvidenceUse·전체 에이전트 적용은 이 정리로 구현 완료되지 않는다.
+
+
+### 구조 읽기 구현 후속 기록
+
+IngesTiger `4c876bbecd0f727386c792976dee21479328cac1` (`1.0.0-draft.3`)는 전체 요청의 문자·UTF-8 바이트 예산과 보류 단위를 기록합니다. 호스트는 원본 접수·분석 재개·구조 단위·검색 문맥 확장·벡터 배치 재개를 구현했습니다. 역할 원문은 바꾸지 않았으며 온톨로지 실행, 관계의 진위 판정, 정본 승격, 학습형 리랭커는 여전히 후속 범위입니다.

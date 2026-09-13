@@ -17,7 +17,10 @@ export interface WikiResponse {
 export interface WikiPayload {
   schemaVersion: 1; upstreamCommit: string; scope: WikiScope;
   source: { sourceId: string; revision: string; sha256: string; parserVersion: string; name: string };
-  coverage: { totalUnits: number; selectedUnitIds: string[]; omittedUnitIds: string[]; pendingRoutes: string[] };
+  coverage: { totalUnits: number; selectedUnitIds: string[]; omittedUnitIds: string[]; pendingRoutes: string[];
+    pendingUnits?: { unit_id: string; reason: string }[] };
+  requestBytes?: number[];
+  budget?: { max_characters: number; max_utf8_bytes: number; token_count: string };
   requests: WikiRequest[];
 }
 export interface WikiCandidate {
@@ -27,7 +30,7 @@ export interface WikiCandidate {
 }
 export interface WikiJob {
   id: string; payload: WikiPayload; candidates: WikiCandidate[];
-  sourceState: 'unchanged' | 'changed'; state: 'awaiting_response' | 'partial' | 'candidate_saved';
+  sourceState: 'unchanged' | 'changed'; state: 'awaiting_response' | 'partial' | 'candidate_saved' | 'needs_subdivision';
   semanticReview: 'pending'; published: false; driveSync: 'not_configured';
 }
 export interface WikiJobSummary {

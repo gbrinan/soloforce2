@@ -1,6 +1,7 @@
 import type { CorpusHit, CorpusSearchResult, CorpusSnapshot } from '../../shared/corpus.js';
 import { CorpusError } from './extract.js';
 import type { CorpusStore } from './store.js';
+import { readChunkContext } from './source-reader.js';
 
 export interface CorpusEmbedder { model: string; embed(texts: string[]): Promise<number[][]> }
 export function validateVectors(vectors: unknown, count: number, dimension?: number): vectors is number[][] {
@@ -103,7 +104,9 @@ export async function searchCorpus(store: CorpusStore, query: string, options: {
     if (!current?.enabled || current.revision !== source.revision || (options.allowed && !options.allowed(source))) continue;
     if ((counts.get(source.sourceId) ?? 0) >= 3) continue;
     counts.set(source.sourceId, (counts.get(source.sourceId) ?? 0) + 1);
-    hits.push({ sourceId: source.sourceId, revision: source.revision, chunkId: chunk.id, title: source.name, locator: chunk.locator, text: chunk.text, ...fused });
+    const context = readChunkContext(source, chunk);
+    if (!context.complete) warnings.push(`${source.name}: ${context.reason === 'legacy_source_requires_reimport' ? '이전 추출판입니다. 구조 문맥을 연결하려면 다시 가져오세요.' : '절·표 전체가 문맥 예산을 넘습니다. 원문을 추가 확인해야 합니다.'}`);
+    hits.push({ sourceId: source.sourceId, revision: source.revision, chunkId: chunk.id, title: source.name, locator: chunk.locator, text: chunk.text, context, ...fused });
     if (hits.length >= Math.max(1, Math.min(options.limit ?? 8, 30))) break;
   }
   return { hits, mode: vectorUsed ? 'keyword_vector_graph' : 'keyword_graph', warnings };

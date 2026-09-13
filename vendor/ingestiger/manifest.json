@@ -1,15 +1,15 @@
 {
   "repository": "https://github.com/gbrinan/ingestiger",
-  "commit": "4f9305d227f4638ee8d03d96a638f12ba6703893",
-  "version": "1.0.0-draft.2",
+  "commit": "4c876bbecd0f727386c792976dee21479328cac1",
+  "version": "1.0.0-draft.3",
   "files": [
     {
       "path": ".claude-plugin/plugin.json",
-      "sha256": "ffc02d08cceeebf0d1f72a425ec73236e39399b65178723013b71abbbaafe72a"
+      "sha256": "a275c7293fefe4ff4483d7ddf798c3a4e109fdfd2d55baf4ef617e6c86655cf7"
     },
     {
       "path": "agent/meta.json",
-      "sha256": "3ec17f8250918e831f19202fd48c508e97062bb757d63f70180ae968a9bdc037"
+      "sha256": "5c4f3a0cc2343f763f9f03dd84d6442cdc2a004b49c322b14238187dbf5ef4fc"
     },
     {
       "path": "agent/role-directive.md",
@@ -21,11 +21,11 @@
     },
     {
       "path": "skills/ingestiger/references/adapters.md",
-      "sha256": "73a602914a0bcc9ada93a346d9b09e512464100a909ec56bc83effe503442e99"
+      "sha256": "3ff4a9dc1258e178d8169476e794ee9d1fdd56f0554ccd871d4e14c9b6063fe3"
     },
     {
       "path": "skills/ingestiger/references/contracts.md",
-      "sha256": "032161b8f21d4d75887bd75b2cfe7e32a91d1fea2a3d736e4c6fe06ebe220afd"
+      "sha256": "58a2f9fbee8e26d6271d04d44a34b3c2674364d67bdd08d046eed3a7efd8f5c4"
     },
     {
       "path": "skills/ingestiger/references/golden-samples.md",
@@ -41,7 +41,7 @@
     },
     {
       "path": "skills/ingestiger/references/runbook.md",
-      "sha256": "32d0c8f0feffd5d28186a671dc7d96835aa5f18d86e7e5919ba8c538090d6310"
+      "sha256": "03579f1b0c62d717656739991f8af3c1fc49df9b531f85e758faf4335598fe72"
     },
     {
       "path": "skills/ingestiger/references/source-quality.md",
@@ -69,7 +69,7 @@
     },
     {
       "path": "skills/ingestiger/scripts/pipeline.py",
-      "sha256": "34499837bf0f9bcdd8c9aeb564b256c41a533e843d747f32c504d0ea402c22f6"
+      "sha256": "66e416dc278fb557207feb5cab6787b435dc65c70369207039e10429f2f63586"
     }
   ]
 }

@@ -41,7 +41,7 @@ try {
   await test('mixed Markdown branches to text + table + user-label graph', async () => {
     const result = await extract('report.md', 'text/markdown', Buffer.from('# 매출\n고객 설명\n\n| 고객 | 금액 |\n| --- | --- |\n| 현대 | 001200 |\n'), ['고객:현대']);
     assert.deepEqual(new Set(result.profile.routes.map(r => r.route)), new Set(['text', 'table', 'graph']));
-    assert.ok(result.chunks.find(c => c.kind === 'table' && c.cells?.includes('001200')));
+    assert.ok(result.units.find(c => c.kind === 'table' && c.cells?.includes('001200')));
   });
   await test('real XLSX preserves formula, cached value, format, sparse cells and sheet', async () => {
     const book = new ExcelJS.Workbook(); const sheet = book.addWorksheet('사업별');
@@ -49,13 +49,13 @@ try {
     sheet.getCell('B3').value = { formula: 'B2*2', result: -2401 }; sheet.getCell('B3').numFmt = '#,##0.00';
     const result = await extract('numbers.xlsx', '', Buffer.from(await book.xlsx.writeBuffer()));
     assert.ok(result.chunks.some(c => c.text.includes('formula=B2*2') && c.text.includes('-2401') && c.locator.includes('사업별')));
-    assert.ok(result.chunks.some(c => c.cells?.[0] === '0012'));
+    assert.ok(result.units.some(c => c.cells?.[0] === '0012'));
   });
   await test('DOCX body and table are separate, XML entities decoded without execution', async () => {
     const zip = new AdmZip(); zip.addFile('word/document.xml', Buffer.from('<w:document><w:p><w:r><w:t>A &amp; B</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>001</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>-50</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:document>'));
     const result = await extract('office.docx', '', zip.toBuffer());
     assert.equal(result.chunks.filter(c => c.kind === 'text')[0].text, 'A & B');
-    assert.deepEqual(result.chunks.find(c => c.kind === 'table')?.cells, ['001', '-50']);
+    assert.deepEqual(result.units.find(c => c.kind === 'table')?.cells, ['001', '-50']);
   });
   await test('PDF uses actual text parser and empty pages require OCR', async () => {
     const text = await extract('real.pdf', 'application/pdf', pdf('Evidence alpha invoice 12345'));

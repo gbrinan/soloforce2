@@ -1,9 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, existsSync, rmSync, copyFileSync, linkSync, constants, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import AdmZip from 'adm-zip';
 import type { CorpusSnapshot, CorpusSource } from '../../shared/corpus.js';
 import { CorpusError, hash } from './extract.js';
+import { fileHashSync } from './files.js';
 
 interface SourceState { revision: string; enabled: boolean }
 const identifier = /^[a-f0-9]{64}$/;
@@ -38,8 +39,8 @@ export class CorpusStore {
     return readdirSync(this.root).filter(id => identifier.test(id)).flatMap(id => {
       const snapshot = this.snapshot(id); const state = this.state(id);
       if (!snapshot || !state) return [];
-      const { chunks, ...metadata } = snapshot;
-      return [{ ...metadata, enabled: state.enabled, chunkCount: chunks.length, revisions: this.revisions(id).length }];
+      const { chunks, units, ...metadata } = snapshot;
+      return [{ ...metadata, enabled: state.enabled, chunkCount: chunks.length, unitCount: units?.length, revisions: this.revisions(id).length }];
     }).sort((a, b) => b.importedAt.localeCompare(a.importedAt));
   }
   revisions(id: string): string[] {
@@ -48,6 +49,22 @@ export class CorpusStore {
   }
   commit(snapshot: CorpusSnapshot, bytes: Buffer): CorpusSource {
     if (hash(bytes) !== snapshot.contentHash) throw new CorpusError('backup_hash_mismatch', 409);
+    return this.persist(snapshot, destination => writeFileSync(destination, bytes, { mode: 0o600, flag: 'wx' }));
+  }
+  commitFile(snapshot: CorpusSnapshot, original: string): CorpusSource {
+    if (fileHashSync(original) !== snapshot.contentHash) throw new CorpusError('backup_hash_mismatch', 409);
+    return this.persist(snapshot, destination => {
+      try { linkSync(original, destination); }
+      catch (e) {
+        if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e;
+        copyFileSync(original, destination, constants.COPYFILE_EXCL);
+      }
+    });
+  }
+  verifyOriginal(snapshot: CorpusSnapshot): boolean {
+    return fileHashSync(join(this.directory(snapshot.sourceId), snapshot.revision, 'original.bin')) === snapshot.contentHash;
+  }
+  private persist(snapshot: CorpusSnapshot, writeOriginal: (destination: string) => void): CorpusSource {
     if (!this.state(snapshot.sourceId) && this.list().length >= 500) throw new CorpusError('source_limit_500', 413);
     const directory = this.directory(snapshot.sourceId);
     if (!identifier.test(snapshot.revision)) throw new CorpusError('invalid_revision', 400);
@@ -57,11 +74,12 @@ export class CorpusStore {
       const staging = join(directory, `.staging-${randomUUID()}`);
       mkdirSync(staging, { mode: 0o700 });
       try {
-        writeFileSync(join(staging, 'original.bin'), bytes, { mode: 0o600, flag: 'wx' });
+        writeOriginal(join(staging, 'original.bin'));
         writeFileSync(join(staging, 'snapshot.json'), JSON.stringify(snapshot, null, 2), { mode: 0o600, flag: 'wx' });
         renameSync(staging, target);
       } finally { rmSync(staging, { force: true, recursive: true }); }
     }
+    if (!this.verifyOriginal(snapshot)) throw new CorpusError('backup_hash_mismatch', 409);
     // 비활성 자료를 재수집해도 사용자의 검색 제외 설정을 유지한다.
     this.writeState(snapshot.sourceId, { revision: snapshot.revision, enabled: this.state(snapshot.sourceId)?.enabled ?? true });
     return this.list().find(source => source.sourceId === snapshot.sourceId)!;
@@ -84,9 +102,10 @@ export class CorpusStore {
     zip.addFile(`${prefix}/current.json`, readFileSync(join(this.directory(id), 'current.json')));
     for (const revision of this.revisions(id)) {
       const snapshot = this.snapshot(id, revision)!;
-      const bytes = readFileSync(join(this.directory(id), revision, 'original.bin'));
-      size += bytes.length;
+      const original = join(this.directory(id), revision, 'original.bin');
+      size += statSync(original).size;
       if (size > 100 * 1024 * 1024) throw new CorpusError('backup_too_large_use_history_backup', 413);
+      const bytes = readFileSync(original);
       if (hash(bytes) !== snapshot.contentHash) throw new CorpusError('backup_hash_mismatch', 409);
       zip.addFile(`${prefix}/${revision}/original.bin`, bytes);
       zip.addFile(`${prefix}/${revision}/snapshot.json`, Buffer.from(JSON.stringify(snapshot, null, 2)));
@@ -104,5 +123,20 @@ export class CorpusStore {
     const path = join(this.directory(id), revision, `vectors-${hash(model)}.json`);
     const temporary = `${path}.${randomUUID()}.tmp`;
     writeFileSync(temporary, JSON.stringify(vectors), { mode: 0o600 }); renameSync(temporary, path);
+  }
+  readVectorProgress(id: string, revision: string, model: string): number[][] {
+    if (!this.snapshot(id, revision)) throw new CorpusError('source_not_found', 404);
+    const path = join(this.directory(id), revision, `vector-progress-${hash(model)}.json`);
+    return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as number[][] : [];
+  }
+  writeVectorProgress(id: string, revision: string, model: string, vectors: number[][]): void {
+    if (!this.snapshot(id, revision)) throw new CorpusError('source_not_found', 404);
+    const path = join(this.directory(id), revision, `vector-progress-${hash(model)}.json`);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, JSON.stringify(vectors), { mode: 0o600 }); renameSync(temporary, path);
+  }
+  clearVectorProgress(id: string, revision: string, model: string): void {
+    if (!this.snapshot(id, revision)) throw new CorpusError('source_not_found', 404);
+    rmSync(join(this.directory(id), revision, `vector-progress-${hash(model)}.json`), { force: true });
   }
 }
