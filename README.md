@@ -18,6 +18,7 @@ AI 에이전트 팀을 운영하는 개인 비서 시스템입니다.
 - **승인 시스템**: 민감 작업에 대해 사장님 승인을 요청하며, 부재중 모드를 지원합니다.
 - **세션 리셋 시 대화 요약 주입**: 세션이 리셋될 때 오늘 대화 요약을 자동으로 프롬프트에 주입하여 맥락을 유지합니다.
 - **자료 수집·분류·검색**: Drive·Notion·로컬 자료의 형식을 먼저 확인하고 본문·표·OCR·전사 경로로 분기합니다. 원본·버전 백업, 키워드·업무 분류 연결 검색, 선택적 로컬 벡터 검색을 지원합니다. [설정과 처리 범위](config/corpus/README.md)
+- **IngesTiger Wiki 후보**: 선택한 자료를 기업·프로젝트별 분석 요청으로 만들고, LLM 응답의 인용·누락·중복을 검사해 근거가 있는 후보로 보존합니다. 후보와 확정 지식을 구분합니다. [사용법과 현재 범위](config/wiki/README.md)
 
 ## 사전 요구사항
 
@@ -28,6 +29,7 @@ AI 에이전트 팀을 운영하는 개인 비서 시스템입니다.
 - **Claude Code CLI** (`claude` 명령어가 PATH에 있어야 합니다)
   - 설치: https://docs.anthropic.com/en/docs/claude-code
   - 설치 후 `claude --version`으로 확인
+- **Python 3**: IngesTiger Wiki 후보 기능 사용 시 필요합니다. 표준 라이브러리만 사용하며 [실행 경로 설정](config/wiki/README.md)을 확인하세요.
 
 ## 설치
 
@@ -100,6 +102,7 @@ npm run start:b    # PORT=3459, MYCREW_HOME=.mycrew-B
 | `npm run start` | 메인 서버 실행 |
 | `npm run build` | TypeScript 컴파일 + Vite 클라이언트 빌드 |
 | `npm run test:corpus` | 자료 파서·버전 보존·검색·접근 제어 및 Drive/Notion 모의 API 검증 |
+| `npm run test:wiki` | IngesTiger 실제 코어·후보 인용·범위·원본 변경·접근 제어·저장 검증 |
 | `npm run test:google-readonly-connection` | 기존 Drive 읽기 전용 연결 회귀 검증 |
 | `npm test` | 전체 테스트 실행 |
 | `npm run verify` | 검증 스크립트 실행 |

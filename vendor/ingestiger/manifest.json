@@ -1,0 +1,83 @@
+{
+  "repository": "https://github.com/gbrinan/ingestiger",
+  "commit": "dd10e86859d16c3170f6075f2b5b19b1438baceb",
+  "version": "1.0.0-draft.1",
+  "files": [
+    {
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "f6f72e88f9814e808684cb776f955ea9019ef5c665bd35f5c032fc728239adad"
+    },
+    {
+      "path": "agent/meta.json",
+      "sha256": "d67d7b7f64be9a41b081d38d85dd5751e6275ded56830da7a64a9e02f234f9e7"
+    },
+    {
+      "path": "agent/role-directive.md",
+      "sha256": "0088deb2a6e25cf12bea17e0122c85c806b7c4d5823c5f6ab62dfe8e8919e686"
+    },
+    {
+      "path": "skills/ingestiger/SKILL.md",
+      "sha256": "bf540007ba2a1f6edcb2f4912485342113aaf53d69e1bcee2e487567872d9856"
+    },
+    {
+      "path": "skills/ingestiger/references/adapters.md",
+      "sha256": "e131c6c66fc22644e0d702acda95add0ced0d0349cacfbfd67677e71961ebdb6"
+    },
+    {
+      "path": "skills/ingestiger/references/contracts.md",
+      "sha256": "0b826639c5b9273fa82789134775864385c342272b2afe08c101b731c137aa3a"
+    },
+    {
+      "path": "skills/ingestiger/references/delivery.md",
+      "sha256": "befa47e15bda44b28671e953ba80c7d595956761dbc313c1eed8a78be6738abd"
+    },
+    {
+      "path": "skills/ingestiger/references/execution.md",
+      "sha256": "2ff1b4a5b8c565518d4533910bfd8cc023559deea49bfb2b5d38dca9c2270cab"
+    },
+    {
+      "path": "skills/ingestiger/references/golden-samples.md",
+      "sha256": "806c90012fec08e15d792c928d14b3ccaacc54187d89891c7ff5ef8b76158229"
+    },
+    {
+      "path": "skills/ingestiger/references/large-decks.md",
+      "sha256": "60530d169ffc7d63379b38db3203bd45a2550a34a4ef2a81a060f96ba666c4f1"
+    },
+    {
+      "path": "skills/ingestiger/references/modes.md",
+      "sha256": "4d59fa262bfcd3a596753437958775ad4ad8b7d8f9ede888c4114b33d36bd0e8"
+    },
+    {
+      "path": "skills/ingestiger/references/runbook.md",
+      "sha256": "89b8b09e1072b22d86fdf5a1de4fe8b5b39a7646c70212a71eb9e166af6a1776"
+    },
+    {
+      "path": "skills/ingestiger/references/source-quality.md",
+      "sha256": "e2d4f3a4050a10a4d6723d790042c01c9fed3d1922af80afa58830e55ad80d56"
+    },
+    {
+      "path": "skills/ingestiger/references/storage.md",
+      "sha256": "0b90912f6e6acfddc1f1c41448f84e21fec216f5dbcf2e963ed19efbbd2a2014"
+    },
+    {
+      "path": "skills/ingestiger/references/structure.md",
+      "sha256": "f85249d85071cd1fa57451d1ff0ae152d7d38370922f38aaf79d7463f5f1a1b7"
+    },
+    {
+      "path": "skills/ingestiger/scripts/deck_inventory.py",
+      "sha256": "cc0d4d910ff90570d71ad570641e87fcb306aa94a1ee8b2d0e632483069651cc"
+    },
+    {
+      "path": "skills/ingestiger/scripts/golden.py",
+      "sha256": "29ba23f709ea7c2e90a690b1f9333e63ddbb31ddf89e6ae269904bf23cd6a4c3"
+    },
+    {
+      "path": "skills/ingestiger/scripts/link_audit.py",
+      "sha256": "e451cb01e46b8af57853cbe378609f72ca6ba83eea3b7cc3ded6343f4150b337"
+    },
+    {
+      "path": "skills/ingestiger/scripts/pipeline.py",
+      "sha256": "00e89f9e5a1a07227b2d36213029f9f078204342266f7f48414fa154ae57cdd3"
+    }
+  ]
+}

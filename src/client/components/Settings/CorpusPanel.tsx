@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Accordion, Alert, Badge, Button, FileInput, Group, Paper, Select, Stack, Switch, Tabs, Text, TextInput } from '@mantine/core';
 import type { CorpusSearchResult, CorpusSnapshot, CorpusSource } from '../../../shared/corpus';
+import WikiPanel from './WikiPanel';
 
 type Source = CorpusSource & { retrievalAllowed: boolean };
 type Connection = { connectionId: string; displayEmail: string; state: string };
@@ -51,6 +52,7 @@ export default function CorpusPanel() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<CorpusSearchResult | null>(null);
   const [snapshot, setSnapshot] = useState<CorpusSnapshot | null>(null);
+  const [wikiSnapshot, setWikiSnapshot] = useState<CorpusSnapshot | null>(null);
 
   const refresh = async () => {
     const [listing, state, google] = await Promise.all([
@@ -70,7 +72,7 @@ export default function CorpusPanel() {
   const imported = (source: CorpusSource) => {
     const pending = source.profile.routes.some(route => route.status !== 'ready');
     setNotice(`${source.name}: 원본 보존 완료 · ${source.chunkCount}개 검색 조각${pending ? ' · 추가 처리가 필요한 항목이 있습니다.' : ''}`);
-    setSnapshot(null); setResults(null);
+    setSnapshot(null); setResults(null); setWikiSnapshot(null);
   };
 
   return <Paper withBorder p="md" radius="md">
@@ -103,7 +105,7 @@ export default function CorpusPanel() {
               <Button size="xs" variant="subtle" color="red" disabled={busy || !connection} onClick={() => void run(async () => {
                 const response = await fetch(`/api/connections/google-drive/${connection}/revoke`, post({}));
                 if (!response.ok) throw new Error('연결을 해제하지 못했습니다. 다시 로그인한 뒤 시도하세요.');
-                setConnection(null); setDriveFiles([]); setDriveFile(null); setResults(null); setSnapshot(null);
+                setConnection(null); setDriveFiles([]); setDriveFile(null); setResults(null); setSnapshot(null); setWikiSnapshot(null);
                 setNotice('연결을 해제했습니다. 해당 자료는 검색에서 제외되고 로컬 백업은 보존됩니다.');
               })}>연결 해제</Button></Group>
             <Select label="가져올 파일" searchable data={driveFiles.map(f => ({ value: f.id, label: f.name }))} value={driveFile} onChange={setDriveFile} disabled={busy} placeholder="파일명으로 검색" />
@@ -146,12 +148,15 @@ export default function CorpusPanel() {
             {!source.retrievalAllowed && <Text size="xs" c="red">연결이 비활성 상태여서 검색에서 제외됩니다.</Text>}
             <Switch label="검색에 포함" checked={source.enabled} disabled={busy || !source.retrievalAllowed} onChange={event => {
               const enabled = event.currentTarget.checked;
-              void run(async () => { await request(`/api/corpus/sources/${source.sourceId}/enabled`, post({ enabled })); setResults(null); setSnapshot(null); });
+              void run(async () => { await request(`/api/corpus/sources/${source.sourceId}/enabled`, post({ enabled })); setResults(null); setSnapshot(null); setWikiSnapshot(null); });
             }} />
             <Group><Button size="xs" variant="light" disabled={busy || !source.retrievalAllowed} onClick={() => void run(async () => {
               setSnapshot((await request<{ snapshot: CorpusSnapshot }>(`/api/corpus/sources/${source.sourceId}`)).snapshot);
             })}>추출 내용 확인</Button>
               <Button size="xs" variant="light" component="a" href={`/api/corpus/sources/${source.sourceId}/backup`} download>모든 버전 백업</Button>
+              <Button size="xs" variant="light" disabled={busy || !source.enabled || !source.retrievalAllowed || !source.chunkCount} onClick={() => void run(async () => {
+                setWikiSnapshot((await request<{ snapshot: CorpusSnapshot }>(`/api/corpus/sources/${source.sourceId}`)).snapshot);
+              })}>Wiki 후보 만들기</Button>
               {status?.embeddingConfigured && <Button size="xs" variant="light" disabled={busy || !source.enabled || !source.retrievalAllowed || !source.chunkCount} onClick={() => void run(async () => {
                 await request(`/api/corpus/sources/${source.sourceId}/vectors`, post({})); setNotice(`${source.name}: 로컬 벡터 색인을 완료했습니다.`);
               })}>벡터 색인</Button>}
@@ -159,6 +164,7 @@ export default function CorpusPanel() {
           </Stack></Accordion.Panel>
         </Accordion.Item>)}
       </Accordion>
+      {wikiSnapshot && <WikiPanel key={`${wikiSnapshot.sourceId}-${wikiSnapshot.revision}`} snapshot={wikiSnapshot} close={() => setWikiSnapshot(null)} />}
       {snapshot && <Paper p="sm" withBorder><Stack gap="xs"><Group justify="space-between"><Text fw={600}>{snapshot.name} · 추출 내용</Text><Button size="xs" variant="subtle" onClick={() => setSnapshot(null)}>닫기</Button></Group>
         <Text size="xs" c="dimmed">총 {snapshot.chunks.length}개 중 처음 20개를 표시합니다. 전체 내용은 백업에 포함됩니다.</Text>
         {snapshot.chunks.slice(0, 20).map(chunk => <div key={chunk.id}><Text size="xs" fw={600}>{chunk.locator}</Text><Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{chunk.text}</Text></div>)}

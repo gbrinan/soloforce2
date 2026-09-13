@@ -28,6 +28,7 @@
     "test:two-instance": "tsx scripts/two-instance-integration-test.ts",
     "test:partner-request": "tsx scripts/two-instance-partner-request-test.ts",
     "verify:app": "node scripts/verify-app-e2e.mjs",
+    "test:wiki": "node --import tsx scripts/wiki-test.ts",
     "test:corpus": "node --import tsx scripts/corpus-test.ts && node --import tsx scripts/corpus-provider-test.ts && node --import tsx scripts/corpus-server-test.ts",
     "test:meeting-memory": "node --import tsx scripts/meeting-memory-test.ts"
   },

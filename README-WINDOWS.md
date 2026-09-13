@@ -69,6 +69,8 @@ git log -1 --oneline
 
 ### 4. 설치·검증·실행
 
+IngesTiger Wiki 후보 기능을 사용하려면 Python 3도 준비합니다. PowerShell에서 `python --version`을 확인하세요. 실행명이 다르면 `py -3 -c "import sys; print(sys.executable)"`로 경로를 확인하고 `.env`의 `INGESTIGER_PYTHON`에 실제 실행 파일 경로를 적습니다. 인자와 바깥 따옴표는 넣지 않습니다. [Wiki 후보 사용법](config/wiki/README.md)
+
 같은 소스 폴더의 PowerShell에서 실행합니다. `npm.cmd`를 사용하므로 `npm.ps1` 실행을 위해 시스템 실행 정책을 바꿀 필요가 없습니다. `npm ci`는 기존 `node_modules`를 재설치하므로 서버가 종료된 상태에서 진행합니다.
 
 ```powershell
@@ -80,6 +82,8 @@ npm.cmd run test:corpus
 if ($LASTEXITCODE -ne 0) { throw '자료 수집 테스트 실패' }
 npm.cmd run test:google-readonly-connection
 if ($LASTEXITCODE -ne 0) { throw 'Drive 회귀 테스트 실패' }
+npm.cmd run test:wiki
+if ($LASTEXITCODE -ne 0) { throw 'IngesTiger Wiki 테스트 실패: Python 실행 경로와 오류를 확인하세요.' }
 npm.cmd start
 ```
 
@@ -91,6 +95,7 @@ npm.cmd start
 Invoke-RestMethod 'http://localhost:3456/api/health'
 Invoke-RestMethod 'http://localhost:3456/api/connections/google-drive/status'
 Invoke-RestMethod 'http://localhost:3456/api/corpus/status'
+Invoke-RestMethod 'http://localhost:3456/api/wiki/capabilities'
 Start-Process 'http://localhost:3456'
 ```
 
@@ -112,7 +117,8 @@ Mac에서 옮긴 .env 위치: [실제 Windows 파일 경로]
 git pull --ff-only로 업데이트해줘. 충돌이나 분기 차이는 원인을 확인해 해결해줘.
 필요한 .env 항목과 경로만 병합하고 비밀 값은 출력·커밋·업로드하지 마.
 Node 24 환경에서 의존성 설치, build, test:corpus,
-test:google-readonly-connection을 실행하고 실제 서버를 재시작해줘.
+test:google-readonly-connection, test:wiki를 실행하고 실제 서버를 재시작해줘.
+IngesTiger에 필요한 Python 3 실행 경로도 확인해줘.
 health·설정 화면·가상 문서 등록/분류/검색/백업까지 확인해줘.
 Google 로그인·권한·약관 동의는 내가 진행할 화면을 알려줘.
 실행 폴더, 적용 커밋, 테스트 결과, 접속 URL, 남은 사용자 동작을 보고해줘.

@@ -71,6 +71,7 @@ export class CorpusStore {
     if (!state) throw new CorpusError('source_not_found', 404);
     this.writeState(id, { ...state, enabled });
   }
+  isEnabled(id: string): boolean { return this.state(id)?.enabled === true; }
   private writeState(id: string, state: SourceState): void {
     const path = join(this.directory(id), 'current.json'); const temporary = `${path}.${randomUUID()}.tmp`;
     writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 }); renameSync(temporary, path);
