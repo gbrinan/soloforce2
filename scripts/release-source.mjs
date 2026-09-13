@@ -19,7 +19,16 @@ if (forbidden.length) throw new Error(`Forbidden release paths: ${forbidden.join
 mkdirSync(dirname(output), { recursive: true });
 execFileSync('git', ['-C', root, 'archive', '--format=zip', '--prefix=soloforce2/', '-o', output, commit]);
 const zip = new AdmZip(output);
-if (!zip.test()) throw new Error('ZIP readback failed');
+// Compare every unpacked file with its Git blob. adm-zip's test() incorrectly
+// indexes entries by entry objects in the installed version.
+for (const row of git('ls-tree', '-r', commit).split('\n')) {
+  const [metadata, name] = row.split('\t');
+  const expected = metadata.split(' ')[2];
+  const bytes = zip.getEntry(`soloforce2/${name}`)?.getData();
+  if (!bytes) throw new Error(`Missing archive entry: ${name}`);
+  const actual = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+  if (actual !== expected) throw new Error(`Git blob readback failed: ${name}`);
+}
 const manifest = JSON.parse(zip.readAsText('soloforce2/vendor/ingestiger/manifest.json'));
 for (const file of manifest.files) {
   const bytes = zip.getEntry(`soloforce2/vendor/ingestiger/${manifest.commit}/${file.path}`)?.getData();
