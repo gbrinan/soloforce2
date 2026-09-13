@@ -27,7 +27,10 @@ for (const row of git('ls-tree', '-r', commit).split('\n')) {
   const bytes = zip.getEntry(`soloforce2/${name}`)?.getData();
   if (!bytes) throw new Error(`Missing archive entry: ${name}`);
   const actual = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-  if (actual !== expected) throw new Error(`Git blob readback failed: ${name}`);
+  // git archive applies .gitattributes, including Windows CRLF conversion.
+  const normalized = actual === expected ? actual : execFileSync('git',
+    ['-C', root, 'hash-object', `--path=${name}`, '--stdin'], { input: bytes, encoding: 'utf8' }).trim();
+  if (normalized !== expected) throw new Error(`Git blob readback failed: ${name}`);
 }
 const manifest = JSON.parse(zip.readAsText('soloforce2/vendor/ingestiger/manifest.json'));
 for (const file of manifest.files) {
