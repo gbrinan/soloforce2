@@ -44,4 +44,4 @@ def inventory(path):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('input');p.add_argument('output');a=p.parse_args()
-    Path(a.output).write_text(json.dumps(inventory(a.input),ensure_ascii=False,indent=2)+'\n')
+    Path(a.output).write_text(json.dumps(inventory(a.input),ensure_ascii=False,indent=2)+'\n', encoding='utf-8')

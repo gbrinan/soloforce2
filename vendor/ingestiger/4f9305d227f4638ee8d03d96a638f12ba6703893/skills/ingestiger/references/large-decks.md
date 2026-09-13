@@ -14,12 +14,7 @@
 | 5. 선택적 확장 | 렌더러/OCR/비전/전사 | 요청한 슬라이드 이미지·영상 구간 근거 | 이를 전체 덱 완료로 표시 |
 | 6. 갱신 | 스크립트+의미 검토 | 바뀐 슬라이드와 영향을 받는 정본·뷰 | 모든 슬라이드의 무조건 재분석 |
 
-현재 `scripts/deck_inventory.py`는 0–1단계와 PPTX의 실제 슬라이드 순서/ID 목록을 구현한다. 슬라이드 텍스트·노트 추출, Keynote 변환, 렌더링·OCR·전사·LLM 작업 스케줄러는 아직 구현하지 않았다.
-
-```sh
-python3 scripts/deck_inventory.py input.key inventory.json
-python3 scripts/deck_inventory.py input.pptx inventory.json
-```
+지원 단계는 [어댑터 상태](adapters.md), 실행 명령은 [운영 문서](runbook.md)를 확인한다.
 
 원본에서 컨테이너 목록만 읽으므로 영상·GIF를 별도 파일로 전량 복사하지 않는다. 이미 안전한 원본 저장소에 있으면 등록 URI로 유지하고, 별도 보관이 필요한 때 원본을 한 번 복사해 hash로 대조한다.
 
@@ -55,4 +50,4 @@ source/source-id/source-revision/
 
 완료율은 파일 하나의 성공/실패로 끝내지 않는다. 텍스트 처리, 시각 확인, 매체 확인을 별도 집계한다. 한 덱을 부분적으로 읽었으면 부분완료이며, 읽지 않은 영상이 사라져서는 안 된다.
 
-Graphify는 필요한 문서/슬라이드의 의미 관계 후보를 만드는 선택 단계다. Keynote 전체나 내장 미디어 전부를 한 번에 넘기는 입구로 사용하지 않는다. 사실 정본과 처리 상태는 IngesTiger가 유지한다.
+선택적 의미 어댑터의 조건은 [어댑터 계약](adapters.md#선택적-의미-어댑터)을 따른다. Keynote 전체나 내장 미디어 전부를 한 번에 넘기지 않는다.

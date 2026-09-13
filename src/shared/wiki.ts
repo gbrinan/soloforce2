@@ -5,6 +5,8 @@ export interface WikiRequest {
   org_id: string; project_id: string; model: string; prompt: string; units: WikiUnit[]; structure: unknown;
 }
 export interface WikiNeed {
+  /** Optional for legacy responses; allowed kinds are validated by the pinned core. */
+  kind?: string;
   title: string; statement: string; details: string[]; departments: string[];
   patterns: string[]; evidence: string[]; claim_status: 'source_reported';
 }

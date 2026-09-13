@@ -22,6 +22,8 @@ const strings = z.array(z.string().min(1).max(24_000)).max(100);
 export const WikiResponseSchema = z.object({ request_id: identifier, results: z.array(z.object({
   unit_id: z.string().min(1).max(200), status: z.enum(['analyzed', 'ambiguous']),
   needs: z.array(z.object({ title: z.string().min(1).max(1000), statement: z.string().min(1).max(24_000),
+    // Keep semantic enumeration in the pinned core; this is the transport boundary.
+    kind: z.string().min(1).max(32).optional(),
     details: strings, departments: strings, patterns: strings, evidence: strings.min(1), claim_status: z.literal('source_reported'),
   }).strict()).max(100),
 }).strict()).max(500) }).strict();

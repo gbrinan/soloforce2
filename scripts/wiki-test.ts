@@ -85,6 +85,28 @@ try {
   assert.equal('payload' in summary || 'candidates' in summary, false);
   console.log('PASS candidate readback, retry, provenance export; semantic reversal remains unapproved candidate');
 
+  const typedJob = await service.prepare({ ...input, model: 'typed-host' });
+  const typedResponse = responseFor(typedJob);
+  typedResponse.results[0].needs[0].kind = 'invented';
+  await assert.rejects(service.submit(typedJob.id, { scope, response: typedResponse }), expectCode('wiki_response_or_units_invalid'));
+  typedResponse.results[0].needs[0].kind = 'constraint';
+  for (const field of ['lifecycle', 'owner_scope', 'provenance', 'approval']) {
+    const injected = structuredClone(typedResponse);
+    Object.assign(injected.results[0].needs[0], { [field]: 'current' });
+    await assert.rejects(service.submit(typedJob.id, { scope, response: injected }));
+  }
+  assert.equal(service.read(scope, typedJob.id).candidates.length, 0);
+  const typedSaved = await service.submit(typedJob.id, { scope, response: typedResponse });
+  assert.equal(typedSaved.candidates.length, 1);
+  assert.equal((await service.submit(typedJob.id, { scope, response: typedResponse })).candidates.length, 1);
+  const typedZip = new AdmZip(service.backup(scope, typedJob.id));
+  const typedEntry = typedZip.getEntries().find(item => item.entryName.endsWith('/C0001.json'))!;
+  const typedKnowledge = JSON.parse(typedEntry.getData().toString('utf8'));
+  assert.equal(typedKnowledge.kind, 'constraint');
+  assert.equal(typedKnowledge.lifecycle, 'candidate');
+  assert.equal('kind' in knowledge, false);
+  console.log('PASS optional knowledge kind readback, legacy response compatibility, invalid kind and authority fields rejected');
+
   const file = join(service.root, 'organizations', scope.orgId, 'projects', scope.projectId, 'changes', job.id, 'candidates', saved.candidates[0].id, 'C0001.json');
   const before = readFileSync(file); writeFileSync(file, '{}');
   assert.throws(() => service.read(scope, job.id), expectCode('wiki_artifact_changed')); writeFileSync(file, before);

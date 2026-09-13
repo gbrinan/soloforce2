@@ -9,6 +9,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 URL = re.compile(r'https?://[^\s<>\[\]"\)]+')
 LOCAL = re.compile(r'(?<![\w/:])(?:[A-Za-z]:[\\/](?!/)|sandbox:/|file:/|/Users/|/home/)\S*')
+ROLES = ('unknown', 'header_or_example', 'instructor_reference', 'participant_material', 'source_material')
+
+def cell_role(sheet, cell):
+    role = cell.get('role', sheet.get('role', 'unknown'))
+    if role not in ROLES: raise ValueError('Invalid explicit cell role')
+    return role
 
 def normalize(raw):
     raw = raw.strip().rstrip('.,;。')
@@ -34,8 +40,7 @@ def audit(source):
         for cell in sheet['cells']:
             cells += 1
             loc = sheet['title']+'!'+cell['cell']
-            row = int(re.search(r'\d+$', cell['cell']).group())
-            role = 'instructor_reference' if '강사예시' in sheet['title'] else ('header_or_example' if row <= 2 else 'participant_material')
+            role = cell_role(sheet, cell)
             val = cell.get('value', {})
             text = str(val.get('stringValue', val.get('numberValue', '')))
             formula = val.get('formulaValue', '')
@@ -71,7 +76,7 @@ def audit(source):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('input');p.add_argument('output')
-    a=p.parse_args(); result=audit(json.loads(Path(a.input).read_text()))
-    Path(a.output).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+    a=p.parse_args(); result=audit(json.loads(Path(a.input).read_text(encoding='utf-8')))
+    Path(a.output).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n', encoding='utf-8')
     print(json.dumps(result['summary'],ensure_ascii=False))
 if __name__=='__main__':main()

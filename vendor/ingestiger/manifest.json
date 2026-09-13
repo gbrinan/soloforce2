@@ -1,63 +1,55 @@
 {
   "repository": "https://github.com/gbrinan/ingestiger",
-  "commit": "dd10e86859d16c3170f6075f2b5b19b1438baceb",
-  "version": "1.0.0-draft.1",
+  "commit": "4f9305d227f4638ee8d03d96a638f12ba6703893",
+  "version": "1.0.0-draft.2",
   "files": [
     {
       "path": ".claude-plugin/plugin.json",
-      "sha256": "f6f72e88f9814e808684cb776f955ea9019ef5c665bd35f5c032fc728239adad"
+      "sha256": "ffc02d08cceeebf0d1f72a425ec73236e39399b65178723013b71abbbaafe72a"
     },
     {
       "path": "agent/meta.json",
-      "sha256": "d67d7b7f64be9a41b081d38d85dd5751e6275ded56830da7a64a9e02f234f9e7"
+      "sha256": "3ec17f8250918e831f19202fd48c508e97062bb757d63f70180ae968a9bdc037"
     },
     {
       "path": "agent/role-directive.md",
-      "sha256": "0088deb2a6e25cf12bea17e0122c85c806b7c4d5823c5f6ab62dfe8e8919e686"
+      "sha256": "1e8829926b0242694a478c3a60a99ffea16878b38718c61275c1b7864637f4a1"
     },
     {
       "path": "skills/ingestiger/SKILL.md",
-      "sha256": "bf540007ba2a1f6edcb2f4912485342113aaf53d69e1bcee2e487567872d9856"
+      "sha256": "f4b2579068c9a30c5bb318ae8868e924cfe2f5e37afc15474bb0cdc5262235e4"
     },
     {
       "path": "skills/ingestiger/references/adapters.md",
-      "sha256": "e131c6c66fc22644e0d702acda95add0ced0d0349cacfbfd67677e71961ebdb6"
+      "sha256": "73a602914a0bcc9ada93a346d9b09e512464100a909ec56bc83effe503442e99"
     },
     {
       "path": "skills/ingestiger/references/contracts.md",
-      "sha256": "0b826639c5b9273fa82789134775864385c342272b2afe08c101b731c137aa3a"
-    },
-    {
-      "path": "skills/ingestiger/references/delivery.md",
-      "sha256": "befa47e15bda44b28671e953ba80c7d595956761dbc313c1eed8a78be6738abd"
-    },
-    {
-      "path": "skills/ingestiger/references/execution.md",
-      "sha256": "2ff1b4a5b8c565518d4533910bfd8cc023559deea49bfb2b5d38dca9c2270cab"
+      "sha256": "032161b8f21d4d75887bd75b2cfe7e32a91d1fea2a3d736e4c6fe06ebe220afd"
     },
     {
       "path": "skills/ingestiger/references/golden-samples.md",
-      "sha256": "806c90012fec08e15d792c928d14b3ccaacc54187d89891c7ff5ef8b76158229"
+      "sha256": "7ad0e3b05adae2a66857c1a98e0c5b4d949636805a8b2e14a0ab19c90f8a7027"
     },
     {
       "path": "skills/ingestiger/references/large-decks.md",
-      "sha256": "60530d169ffc7d63379b38db3203bd45a2550a34a4ef2a81a060f96ba666c4f1"
+      "sha256": "fdcef05f2573732f63d8726e8a13a9ede8d162fc159f98eb65e1470dec9e43f5"
     },
     {
       "path": "skills/ingestiger/references/modes.md",
-      "sha256": "4d59fa262bfcd3a596753437958775ad4ad8b7d8f9ede888c4114b33d36bd0e8"
+      "sha256": "0ee531372785ca79d2f3707c2524f444c96ed75987fbbebe5d570c1b00eb4b38"
     },
     {
       "path": "skills/ingestiger/references/runbook.md",
-      "sha256": "89b8b09e1072b22d86fdf5a1de4fe8b5b39a7646c70212a71eb9e166af6a1776"
+      "sha256": "32d0c8f0feffd5d28186a671dc7d96835aa5f18d86e7e5919ba8c538090d6310"
     },
     {
       "path": "skills/ingestiger/references/source-quality.md",
-      "sha256": "e2d4f3a4050a10a4d6723d790042c01c9fed3d1922af80afa58830e55ad80d56"
+      "sha256": "a5e3d853058113776084e2083550b55f239e20ed34e3f478fa8e4248f34e0a59"
     },
     {
       "path": "skills/ingestiger/references/storage.md",
-      "sha256": "0b90912f6e6acfddc1f1c41448f84e21fec216f5dbcf2e963ed19efbbd2a2014"
+      "sha256": "1c4f8d34c01e46ee1e75a1c58e9fc68d512ce5b8f5859f9384a6e2dfad8ef7b0"
     },
     {
       "path": "skills/ingestiger/references/structure.md",
@@ -65,19 +57,19 @@
     },
     {
       "path": "skills/ingestiger/scripts/deck_inventory.py",
-      "sha256": "cc0d4d910ff90570d71ad570641e87fcb306aa94a1ee8b2d0e632483069651cc"
+      "sha256": "03bed687e5c6e7b5f171653405b051ca45d04ffdfd8a70ff8ca26838a708b1cd"
     },
     {
       "path": "skills/ingestiger/scripts/golden.py",
-      "sha256": "29ba23f709ea7c2e90a690b1f9333e63ddbb31ddf89e6ae269904bf23cd6a4c3"
+      "sha256": "5dbb7cee4d6fe4b74065742b353bd8d49ca4df7e34e98ad9da76d5b375efba3b"
     },
     {
       "path": "skills/ingestiger/scripts/link_audit.py",
-      "sha256": "e451cb01e46b8af57853cbe378609f72ca6ba83eea3b7cc3ded6343f4150b337"
+      "sha256": "0439d472bfd62f693ce644961f25001f1ea9ab73a2a0a8d35ec84dca4b9132b4"
     },
     {
       "path": "skills/ingestiger/scripts/pipeline.py",
-      "sha256": "00e89f9e5a1a07227b2d36213029f9f078204342266f7f48414fa154ae57cdd3"
+      "sha256": "34499837bf0f9bcdd8c9aeb564b256c41a533e843d747f32c504d0ea402c22f6"
     }
   ]
 }

@@ -11,13 +11,7 @@ project/golden/GS001/
 
 `load_policy=on_demand`, `analysis_policy=storage_only`가 기본이며 이미지 등록 정본에는 observation/criteria/performance를 추가하지 않는다. 필요할 때 사용자가 지정한 샘플이나 업무에 관련된 샘플을 열어 참조한다. 이때 수행한 분석이 필요하면 해당 작업의 산출물에 남긴다. 샘플 등록 자체를 분석 작업으로 바꾸지 않는다.
 
-스킬 폴더에서 실행한다. Python 표준 라이브러리만 사용한다.
-
-```sh
-python3 scripts/golden.py register sample.jpg /approved/project/golden --id GS001 --org company --project project --selection-quote '실제 사용자 선정 발언'
-python3 scripts/golden.py render /approved/project/golden/GS001
-python3 scripts/golden.py packet /approved/project/golden/GS001 reference-pointer.json --org company --project project
-```
+등록·목차·포인터 명령은 [운영 문서](runbook.md#이미지-레퍼런스)에 둔다. 새 샘플의 channel은 사용자가 확인한 값으로만 지정하며 생략하면 unknown이다. 광고 이미지만 sns-ad로 지정한다. 같은 원본·범위·선정 발언을 재등록할 때 channel을 생략하면 기존 값을 보존한다. 명시적으로 다른 값을 주면 새 판 준비가 필요하다는 오류를 반환하며 기존 등록을 덮어쓰지 않는다.
 
 packet은 이미지의 ID·판·경로·hash를 가진 포인터다. 이미지 바이트나 분석을 LLM에 자동으로 붙이지 않는다. pipeline에 포인터가 들어가도 일반 문서 수집에서는 이미지를 열거나 reference_review를 요구하지 않는다. 필요 시 열람은 현재 사용자 작업 범위에 따라 호스트가 선택한다.
 
