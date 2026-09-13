@@ -148,8 +148,8 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
   chmodSync(mcpConfigPath, 0o600);
 
   const { sessionId } = getGenieSessionInfo();
-  const baseDirective = `${SUBMIT_RESPONSE_DIRECTIVE}\n\n작업 도중 사용자에게 진행 상황을 알리려면 post_message MCP 툴로 중간 메시지를 보내세요 — post_message는 턴을 끝내지 않습니다. 최종 답변과 턴 종료는 반드시 submit_response를 쓰세요.`;
-  let appendSystemPrompt = baseDirective + "\n\n" + WIKI_WORKER_GUIDANCE;
+  const baseDirective = `${WIKI_WORKER_GUIDANCE}\n\n${SUBMIT_RESPONSE_DIRECTIVE}\n\n작업 도중 사용자에게 진행 상황을 알리려면 post_message MCP 툴로 중간 메시지를 보내세요 — post_message는 턴을 끝내지 않습니다. 최종 답변과 턴 종료는 반드시 submit_response를 쓰세요.`;
+  let appendSystemPrompt = baseDirective;
   // --strict-mcp-config: 프로젝트/유저 .mcp.json(예: playwright)이 머지돼 새어들면
   // 허용목록에 없는 MCP 도구 호출 시 TUI 권한창이 떠 PTY가 갇힌다. safefs만 로드되게 강제.
   const cliArgs = ["--no-chrome", "--strict-mcp-config", "--mcp-config", mcpConfigPath];
