@@ -1,3 +1,4 @@
+import { WikiWorkerService } from './worker-service.js';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -44,6 +45,7 @@ export function createWikiRoutes(options: { service?: WikiService; authorize?: (
   app.get('/jobs/:id/reviews', c => c.json({ reviews: knowledge.reviews(scope(c), c.req.param('id')) }));
   app.post('/jobs/:id/analyze', async c => c.json(await execution.analyze(c.req.param('id'), await c.req.json())));
   app.get('/knowledge', c => c.json(knowledge.list(scope(c))));
+  app.get('/knowledge/:id/usage', c => c.json(new WikiWorkerService(knowledge).usage(scope(c), c.req.param('id'))));
   app.get('/knowledge/:id', c => c.json(knowledge.read(scope(c), c.req.param('id'))));
   app.post('/reviews', async c => c.json({ review: knowledge.review(await c.req.json(), getRequestUserKey(c)) }, 201));
   app.post('/commit', async c => {

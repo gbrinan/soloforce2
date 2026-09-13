@@ -38,7 +38,8 @@
     "test:wiki-product": "node --import tsx scripts/wiki-product-test.ts",
     "preview:wiki": "node --import tsx scripts/wiki-preview.ts",
     "test:wiki-live": "node --import tsx scripts/wiki-live-test.ts",
-    "release:source": "node scripts/release-source.mjs"
+    "release:source": "node scripts/release-source.mjs",
+    "test:wiki-collaboration": "node --import tsx scripts/wiki-collaboration-test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

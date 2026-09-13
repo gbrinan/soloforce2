@@ -15,6 +15,8 @@ export default function WikiKnowledgePanel({ job, api }: { job: WikiJob; api: <T
   const [error, setError] = useState('');
   const [readback, setReadback] = useState<WikiKnowledgeView | null>(null);
   const [notice, setNotice] = useState('');
+  const [usage, setUsage] = useState<{ agent: string; jobId: string; outputPath: string; locations: { lines: number[] }[]; recordedAt: string; knowledgeState: string; outputState: string; sourceState: string }[] | null>(null);
+  useEffect(() => { setUsage(null); }, [readback?.knowledge.id, readback?.knowledge.revision]);
   const scope = job.payload.scope;
   const query = new URLSearchParams({ ...scope }).toString();
   const choices = job.candidates.flatMap(candidate => candidate.response.results.flatMap((result, unitIndex) => result.needs.map((need, needIndex) => ({
@@ -35,7 +37,7 @@ export default function WikiKnowledgePanel({ job, api }: { job: WikiJob; api: <T
     try { await operation(); } catch (error) { setError(error instanceof Error ? error.message : '정본 작업 실패'); }
     finally { setBusy(false); }
   };
-  useEffect(() => { void run(refresh); }, [job.id, job.candidates.length]);
+  useEffect(() => { setReadback(null); setUsage(null); void run(refresh); }, [job.id, job.candidates.length]);
   return <Paper withBorder p="sm"><Stack gap="sm">
     <Text fw={600}>후보 검토와 프로젝트 정본</Text>
     <Text size="sm">원문과 후보의 조건·예외를 대조한 후 결정하세요. 정본 반영은 이 프로젝트에서 제공할 판을 선택합니다. 업무 승인이나 외부 사실 검증은 별도입니다.</Text>
@@ -89,7 +91,17 @@ export default function WikiKnowledgePanel({ job, api }: { job: WikiJob; api: <T
       {readback.knowledge.details.map((detail, index) => <Text key={index} size="sm">• {detail}</Text>)}
       <Text size="sm">근거: {readback.knowledge.provenance.locator} · {readback.knowledge.evidence.join(' / ')}</Text>
       <Text size="sm">검토 범위와 조건: {readback.knowledge.conditions.note}</Text>
-      <Text size="xs">적용 기간은 별도 확정 전입니다. 등록된 전체 제약의 자동 대조와 작업 결과의 실제 사용 추적은 아직 지원하지 않습니다.</Text>
+      <Text size="xs">적용 기간은 별도 확정 전입니다. 직원은 검색 순위와 별개로 제약·미결정 목록을 확인합니다. 인용 기록은 의미상 올바른 적용을 보증하지 않습니다.</Text>
+      <Button variant="light" disabled={busy} onClick={() => void run(async () => {
+        const result = await api<{ items: NonNullable<typeof usage> }>(`/knowledge/${readback.knowledge.id}/usage?${query}`);
+        setUsage(result.items);
+      })}>이 지식을 인용한 결과물 확인</Button>
+      {usage && usage.length === 0 && <Text size="sm">확인된 인용 기록이 없습니다.</Text>}
+      {usage?.map((item, index) => <Paper withBorder p="xs" key={`${item.jobId}-${index}`}>
+        <Text size="sm">{item.agent} · {item.recordedAt}</Text>
+        <Text size="xs" style={{ overflowWrap: 'anywhere' }}>{item.outputPath} · 인용 위치 {item.locations.flatMap(location => location.lines).join(", ")}행</Text>
+        <Text size="sm">{item.knowledgeState === 'revised' ? '지식 판 변경 · 재검토 필요' : '같은 지식 판'} · {item.outputState === 'unchanged' ? '결과물 해시 일치' : '결과물 변경 또는 접근 불가'}{item.sourceState === 'changed' ? ' · 원본 변경' : ''}</Text>
+      </Paper>)}
     </Stack></Paper>}
   </Stack></Paper>;
 }

@@ -1,5 +1,6 @@
+import { issueWikiWorkerAccess, WIKI_WORKER_GUIDANCE } from './server/wiki/worker-access.js';
 import { spawn } from "node:child_process";
-import { writeFileSync, existsSync, statSync, readdirSync, readFileSync } from "node:fs";
+import { writeFileSync, existsSync, statSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -138,7 +139,7 @@ function getOrCreateMcpConfigPath(content: string, role: string): string {
   const cached = mcpConfigPathCache.get(hash);
   if (cached && existsSync(cached)) return cached;
   const path = join(tmpdir(), `mycrew-mcp-${role}-${process.pid}-${hash}.json`);
-  if (!existsSync(path)) writeFileSync(path, content, "utf-8");
+  if (!existsSync(path)) writeFileSync(path, content, { encoding: "utf-8", mode: 0o600 });
   mcpConfigPathCache.set(hash, path);
   return path;
 }
@@ -217,6 +218,8 @@ export function buildPermissionArgs(config: AgentConfig, opts?: { interactive?: 
   if (hasWritePaths) mcpTools.push("mcp__safefs__SafeWrite", "mcp__safefs__SafeEdit", "mcp__safefs__SafeDelete");
   if (hasReadPaths) mcpTools.push("mcp__safefs__SafeRead", "mcp__safefs__SafeReadImage", "mcp__safefs__SafeGlob", "mcp__safefs__SafeGrep");
   if (hasReadPaths && hasWritePaths) mcpTools.push("mcp__safefs__RenderMarkdownPdf");
+  if (hasReadPaths) mcpTools.push("mcp__safefs__WikiSearch", "mcp__safefs__WikiRead", "mcp__safefs__WikiRecordUsage");
+  if (hasReadPaths && config.allowedTools.includes("DelegateTask")) mcpTools.push("mcp__safefs__WikiHandoff");
   if (hasBash) mcpTools.push("mcp__safefs__SafeBash");
   if (config.allowedTools.includes("DelegateTask")) mcpTools.push("mcp__safefs__DelegateTask", "mcp__safefs__DelegatePlan");
   if (config.allowedTools.includes("SendToPartner")) mcpTools.push("mcp__safefs__SendToPartner");
@@ -328,6 +331,8 @@ export async function runAgent(
   if (hasWritePaths) mcpTools.push("mcp__safefs__SafeWrite", "mcp__safefs__SafeEdit", "mcp__safefs__SafeDelete");
   if (hasReadPaths) mcpTools.push("mcp__safefs__SafeRead", "mcp__safefs__SafeReadImage", "mcp__safefs__SafeGlob", "mcp__safefs__SafeGrep");
   if (hasReadPaths && hasWritePaths) mcpTools.push("mcp__safefs__RenderMarkdownPdf");
+  if (hasReadPaths) mcpTools.push("mcp__safefs__WikiSearch", "mcp__safefs__WikiRead", "mcp__safefs__WikiRecordUsage");
+  if (hasReadPaths && config.allowedTools.includes("DelegateTask")) mcpTools.push("mcp__safefs__WikiHandoff");
   if (hasBash) mcpTools.push("mcp__safefs__SafeBash");
   if (config.allowedTools.includes("DelegateTask")) mcpTools.push("mcp__safefs__DelegateTask");
   if (config.allowedTools.includes("SendToPartner")) mcpTools.push("mcp__safefs__SendToPartner");
@@ -369,9 +374,12 @@ export async function runAgent(
     args.push("--settings", JSON.stringify(permSettings));
   }
 
+  const wikiGrant = hasReadPaths ? issueWikiWorkerAccess({ agent: config.role, jobId: taskId, home: MYCREW_HOME,
+    readPaths: config.readPaths ?? [], sensitivePaths: config.readSensitivePaths ?? [], canDelegate: config.allowedTools.includes("DelegateTask") }) : undefined;
+  let mcpConfigPath: string | undefined;
+  try {
   // MCP 서버 config 임시 파일 (writePaths or readPaths or bash 있는 에이전트)
   // 동일 내용은 캐시 재사용 — 매 호출마다 write/unlink 생략.
-  let mcpConfigPath: string | undefined;
   if (hasWritePaths || hasReadPaths || hasBash) {
     const safefsCmd = resolveSafefsCommand();
     const mcpServers: Record<string, unknown> = {
@@ -404,6 +412,8 @@ export async function runAgent(
             MCP_ROTATE_TOKEN_URL: `http://127.0.0.1:${process.env.PORT ?? 3456}/api/genie/external-rotate-token`,
             MCP_AGENT_ROLE: config.role,
             MCP_JOB_ID: taskId,
+            MCP_WIKI_URL: `http://127.0.0.1:${process.env.PORT ?? 3456}/api/wiki-worker`,
+            MCP_WIKI_TOKEN: wikiGrant?.token ?? "",
             MCP_CWD: options.cwd ?? PROJECT_SELF_DIR,
             MCP_SELF_DIR: PROJECT_SELF_DIR,
             MCP_MYCREW_HOME: MYCREW_HOME,
@@ -478,7 +488,9 @@ export async function runAgent(
   }
 
   if (!options.resumeSessionId) {
-    args.push("--append-system-prompt", config.systemPrompt);
+    args.push("--append-system-prompt", config.systemPrompt + (hasReadPaths ? WIKI_WORKER_GUIDANCE : ""));
+  } else if (hasReadPaths) {
+    args.push("--append-system-prompt", WIKI_WORKER_GUIDANCE);
   }
 
   console.log(`\n[${config.name}] 작업 시작: ${prompt.slice(0, 80)}...`);
@@ -612,8 +624,14 @@ export async function runAgent(
     output: "",
     error: "API 과부하 재시도 소진",
   };
-  // mcpConfigPath는 getOrCreateMcpConfigPath로 재사용 — 호출 종료 시 unlink하지 않음.
-  // pid 포함 파일명이라 다른 프로세스와 충돌 없고, OS tmp 자동 정리에 위임.
+  } finally {
+    wikiGrant?.revoke();
+    if (wikiGrant && mcpConfigPath) {
+      rmSync(mcpConfigPath, { force: true });
+      for (const [key, value] of mcpConfigPathCache) if (value === mcpConfigPath) mcpConfigPathCache.delete(key);
+    }
+  }
+  // Wiki capability configs are removed above; configs without a capability remain cached.
 }
 
 // 기존 방식 (buffered)

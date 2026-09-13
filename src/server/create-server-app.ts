@@ -1,3 +1,4 @@
+import { createWikiWorkerRoutes } from './wiki/worker-routes.js';
 import { createMeetingMemoryRoutes } from "./meeting-memory-routes.js";
 import { MEETINGS_DIR } from "./meetings.js";
 import { Hono } from "hono";
@@ -19,6 +20,8 @@ const ConfirmUpdateSchema = z.object({ confirm: z.literal(true) }).passthrough()
 
 export function createServerApp(): Hono {
   const app = new Hono();
+  // Worker capability routes have their own authentication, independent of browser SSO.
+  app.route('/api/wiki-worker', createWikiWorkerRoutes());
   registerRoutes(app);
   app.route("/api/store", storeRoutes);
   app.route("/api/voice", voiceRoutes); // 자비스뷰 음성 TTS/STT/프로필

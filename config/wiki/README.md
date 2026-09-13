@@ -109,3 +109,7 @@ npm run build
 2026-09-14 Mac의 기존 Claude 로그인으로 합성 자료를 실제 호출했다. 원문 언어를 보존하도록 draft.6을 보완하고 재호출·인용 검사를 통과했다. 의미 조건이 부족한 후보는 보류하고 적용일 후보의 정본 반영·ID 재조회만 검증했다. [실호출 기록](../../docs/ingestiger-live-release.md). Windows 실제 실행은 별도다.
 
 명시적으로 실제 모델 호출을 검사하려면 `npm run test:wiki-live -- --confirm-real-call --output <report.json>`을 실행한다. 계정 사용량을 소모하며 합성 자료와 별도 임시 history를 사용한다. 결과 보고서는 후보를 포함하므로 로컬에 보관한다.
+
+## 일반 직원의 조회·인계·인용 기록
+
+[직원 협업 운영 안내](../../docs/ingestiger-agent-collaboration.md)를 따른다. WikiSearch·WikiRead·WikiHandoff·WikiRecordUsage를 일반 Claude 직원과 Genie에 연결했다. 기존 읽기 권한을 확인하며, 정본 화면에서 인용한 결과물과 변경 상태를 조회한다. 추가 검사는 `npm run test:wiki-collaboration`이다. 실제 다중 모델 협업·Windows PTY 실행은 별도 검증이 필요하다.

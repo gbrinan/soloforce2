@@ -1,3 +1,4 @@
+import { registerWikiDelegate } from './wiki/worker-routes.js';
 import { mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync, rmSync, openSync, readSync, closeSync, statSync, renameSync, chmodSync, createReadStream } from "node:fs";
 
 // 자료실 표시용 md 첫 헤더(`# 제목`) 추출. head 4KB만 read해 큰 파일 성능 보호.
@@ -899,6 +900,8 @@ export function registerRoutes(app: Hono): void {
   }
 
   // 내부 위임 (마이크루→직원, MCP DelegateTask 호출 경로)
+  registerWikiDelegate(input => handleDelegate(input, { external: false }));
+
   app.post("/api/delegate", async (c) => {
     const body = await c.req.json<{
       request: string;

@@ -1,3 +1,4 @@
+import { issueWikiWorkerAccess, WIKI_WORKER_GUIDANCE } from './wiki/worker-access.js';
 /**
  * 터미널 모드: WebSocket ↔ 마이크루 PTY 브릿지
  * - /ws/terminal 경로로 WebSocket 연결, Claude CLI interactive 세션을 xterm.js에 전달
@@ -12,7 +13,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { appendFileSync, mkdirSync, existsSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
+import { chmodSync, appendFileSync, mkdirSync, existsSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -79,6 +80,7 @@ const HEARTBEAT_MS = 30_000;
 
 // ── 마이크루 PTY (AgentPty) ───────────────────────────────────────────────────────
 /** 마이크루 PTY의 MCP config + cliArgs 생성 — AgentPty가 (재)spawn마다 호출 */
+let genieWikiGrant: ReturnType<typeof issueWikiWorkerAccess> | undefined;
 async function buildGenieSpawn(): Promise<SpawnSpec> {
   const genieConfig = getGenieAgent();
   const mcpConfigPath = join(tmpdir(), `mycrew-mcp-pty-${process.pid}.json`);
@@ -86,6 +88,9 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
   const memDir = computeMemoryDir(PROJECT_SELF_DIR);
   // 마이크루에 할당된 MCP 서버를 레지스트리에서 해석 (safefs는 아래에 항상 직접 포함)
   const { servers: extraMcp, allowNames, approvalNames } = resolveAgentMcpServers(genieConfig.mcpServers);
+  genieWikiGrant?.revoke();
+  genieWikiGrant = issueWikiWorkerAccess({ agent: genieConfig.role, jobId: `terminal-${Date.now()}`, home: MYCREW_HOME,
+    readPaths: genieConfig.readPaths ?? [], sensitivePaths: genieConfig.readSensitivePaths ?? [], canDelegate: genieConfig.allowedTools.includes('DelegateTask') });
   writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
       ...extraMcp,
@@ -115,6 +120,8 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
           MCP_REQUEST_PARTNERSHIP_URL: `http://127.0.0.1:${port}/api/genie/external-partner-request`,
           MCP_ROTATE_TOKEN_URL: `http://127.0.0.1:${port}/api/genie/external-rotate-token`,
           MCP_MY_PROFILE_URL: `http://127.0.0.1:${port}/api/genie/my-profile`,
+          MCP_WIKI_URL: `http://127.0.0.1:${port}/api/wiki-worker`,
+          MCP_WIKI_TOKEN: genieWikiGrant.token,
           MCP_AGENT_ROLE: genieConfig.role,
           MCP_JOB_ID: "terminal",
           MCP_CWD: PROJECT_SELF_DIR,
@@ -137,11 +144,12 @@ async function buildGenieSpawn(): Promise<SpawnSpec> {
         },
       },
     },
-  }));
+  }), { mode: 0o600 });
+  chmodSync(mcpConfigPath, 0o600);
 
   const { sessionId } = getGenieSessionInfo();
   const baseDirective = `${SUBMIT_RESPONSE_DIRECTIVE}\n\n작업 도중 사용자에게 진행 상황을 알리려면 post_message MCP 툴로 중간 메시지를 보내세요 — post_message는 턴을 끝내지 않습니다. 최종 답변과 턴 종료는 반드시 submit_response를 쓰세요.`;
-  let appendSystemPrompt = baseDirective;
+  let appendSystemPrompt = baseDirective + "\n\n" + WIKI_WORKER_GUIDANCE;
   // --strict-mcp-config: 프로젝트/유저 .mcp.json(예: playwright)이 머지돼 새어들면
   // 허용목록에 없는 MCP 도구 호출 시 TUI 권한창이 떠 PTY가 갇힌다. safefs만 로드되게 강제.
   const cliArgs = ["--no-chrome", "--strict-mcp-config", "--mcp-config", mcpConfigPath];
@@ -239,6 +247,7 @@ const geniePty = new AgentPty({
     scanAgentLifecycle(data);
   },
   onExit: (exitCode) => {
+    genieWikiGrant?.revoke();
     // 예기치 않은 종료 → 뷰어 닫아 클라이언트 재연결 유도 (재연결 시 재spawn).
     // 명시적 terminate(리셋)는 AgentPty가 onExit를 건너뛰므로 여기 안 옴.
     for (const ws of viewers) { try { ws.close(); } catch { /* */ } }
@@ -405,6 +414,7 @@ export function hasTerminalViewers(): boolean { return viewers.size > 0; }
 export async function releaseGeniePtyForChat(): Promise<boolean> {
   if (!geniePty.ready || viewers.size > 0) return false;
   console.log("[Terminal] 채팅 모드 — idle PTY 종료(세션 릴리스)");
+  genieWikiGrant?.revoke();
   geniePty.terminate({ force: true });
   // claude CLI는 SIGHUP에 빠르게 종료 — 세션 파일 락이 풀릴 여유로 잠시 대기.
   await new Promise((r) => setTimeout(r, 1500));
@@ -420,6 +430,7 @@ export async function ptyRespawnForReset(): Promise<void> {
   if (geniePty.ready) {
     console.log("[Terminal] 세션 리셋 — PTY force terminate 후 재spawn");
   }
+  genieWikiGrant?.revoke();
   geniePty.terminate({ force: true });
   await geniePty.ensureReady();
 }
@@ -538,6 +549,7 @@ export function handleTerminalUpgrade(req: IncomingMessage, socket: Socket, head
 
 export function closeTerminalWS(): void {
   if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+  genieWikiGrant?.revoke();
   geniePty.terminate({ force: true });
   if (wss) { wss.close(); wss = null; }
 }

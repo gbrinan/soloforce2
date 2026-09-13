@@ -1,3 +1,4 @@
+import { issueWikiWorkerAccess, WIKI_WORKER_GUIDANCE } from './wiki/worker-access.js';
 /**
  * worker-pty.ts — 워커를 인터랙티브 PTY로 실행 (claude -p 대안).
  *
@@ -12,7 +13,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { writeFileSync, existsSync, unlinkSync } from "node:fs";
+import { chmodSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -32,6 +33,8 @@ import { effortForConfig } from "./effort-policy.js";
 import { getUserTitle } from "./user-title.js";
 import { OVERLOAD_BACKOFFS_MS, isApiOverloadError, sleep, withJitter } from "../claude-error-retry.js";
 
+const wikiJobs = new Map<string, string>();
+const wikiGrants = new Map<string, ReturnType<typeof issueWikiWorkerAccess>>();
 const workerPtys = new Map<string, AgentPty>();
 const workerSessions = new Map<string, string>();  // agentId → claude 세션 ID (--resume용)
 const workerViewers = new Map<string, Set<WebSocket>>();  // agentId → 라이브 터미널 뷰어
@@ -56,6 +59,10 @@ async function buildWorkerSpawn(config: AgentConfig) {
   // 할당된 MCP 서버를 레지스트리에서 해석 (safefs는 아래에 항상 직접 포함)
   const { servers: extraMcp, allowNames, approvalNames } = resolveAgentMcpServers(config.mcpServers);
 
+  wikiGrants.get(agentId)?.revoke();
+  const wikiGrant = issueWikiWorkerAccess({ agent: agentId, get jobId() { return wikiJobs.get(agentId) ?? ''; }, home: MYCREW_HOME,
+    readPaths: config.readPaths ?? [], sensitivePaths: config.readSensitivePaths ?? [], canDelegate: config.allowedTools.includes('DelegateTask') });
+  wikiGrants.set(agentId, wikiGrant);
   writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
       safefs: {
@@ -82,6 +89,8 @@ async function buildWorkerSpawn(config: AgentConfig) {
           MCP_REQUEST_PARTNERSHIP_URL: `${base}/api/genie/external-partner-request`,
           MCP_ROTATE_TOKEN_URL: `${base}/api/genie/external-rotate-token`,
           MCP_MY_PROFILE_URL: `${base}/api/genie/my-profile`,
+          MCP_WIKI_URL: `${base}/api/wiki-worker`,
+          MCP_WIKI_TOKEN: wikiGrant.token,
           MCP_AGENT_ROLE: config.role,
           // 상주 PTY라 잡별 갱신 불가 — 고정값. 서버가 worker-* 를 현재 lease의 실제 jobId로 해석.
           MCP_JOB_ID: `worker-${agentId}`,
@@ -114,7 +123,8 @@ async function buildWorkerSpawn(config: AgentConfig) {
   const preToolUse = approvalNames.map((n) => ({
     matcher: `mcp__${n}__.*`,
     hooks: [{ type: "command", command: hookCmd, timeout: 70 }],
-  }));
+  }), { mode: 0o600 });
+  chmodSync(mcpConfigPath, 0o600);
   // Stop 훅 안전망(마이크루와 동일) — 워커가 submit_response를 누락/미해소해도 턴 종료 시
   // last_assistant_message를 /api/agent-response로 전달해 busy 갇힘 방지 + 보고 회수. (Stop은 matcher 미지원)
   const hooks: Record<string, unknown> = {
@@ -140,7 +150,7 @@ async function buildWorkerSpawn(config: AgentConfig) {
   // 위임 작업은 '빈 응답' 금지 — 빈 submit_response는 마이크루가 '완료'로 오해해 무한 재위임을 부른다.
   // (위 SUBMIT_RESPONSE_DIRECTIVE의 '답 없으면 빈 content' 안내는 마이크루의 단순 확인 턴 한정 — 워커의 위임 작업에는 적용 안 됨)
   const reportDirective = "위임받은 작업은 끝나면 결과를 반드시 submit_response의 content에 담아 보고하세요 — 성공이면 한 일 요약, 실패·중단·불가면 '왜 못 했는지'와 '누가/어떻게 해야 하는지'를 적으세요. 특히 도구나 권한이 없어 못 하는 작업이면 그 사실을 명확히 보고하세요(예: 'MCP 설치는 제 권한 밖입니다 — 마이크루가 manage_mcp 도구로 직접 해야 합니다'). 위임 작업에 빈 응답(빈 content)은 금지입니다 — 빈 응답을 보내면 마이크루가 '완료됐다'고 오해해 같은 일을 무한 재위임합니다. 그리고 submit_response의 summary 인자에 핵심 결과를 한두 줄로 요약해 넣으세요 — 카드·보고에 이 요약이 표시됩니다(머리만 자르지 말고 진짜 요약, 실패면 사유 요약).";
-  cliArgs.push("--append-system-prompt", `${config.systemPrompt}\n\n${SUBMIT_RESPONSE_DIRECTIVE}\n\n${askDirective}\n\n${approvalDirective}\n\n${reportDirective}`);
+  cliArgs.push("--append-system-prompt", `${config.systemPrompt}\n\n${WIKI_WORKER_GUIDANCE}\n\n${SUBMIT_RESPONSE_DIRECTIVE}\n\n${askDirective}\n\n${approvalDirective}\n\n${reportDirective}`);
 
   return {
     cliArgs,
@@ -188,6 +198,8 @@ export async function runInteractiveWorker(
   taskId: string,
   prompt: string,
 ): Promise<AgentResult> {
+  wikiJobs.set(config.role, taskId);
+  try {
   let pty = getWorkerPty(config);
   const maxOverloadRetries = OVERLOAD_BACKOFFS_MS.length;
   for (let overloadAttempt = 0; overloadAttempt <= maxOverloadRetries; overloadAttempt++) {
@@ -244,6 +256,7 @@ export async function runInteractiveWorker(
   }
   // 재시도 루프 소진 — 마지막 시도는 항상 return하므로 도달 불가. 타입 안정성용 fallback.
   return { agentRole: config.role, taskId, success: false, output: "", error: "API 과부하 재시도 소진" };
+  } finally { if (wikiJobs.get(config.role) === taskId) wikiJobs.delete(config.role); }
 }
 
 /** submit_response 수신 (워커별 — /api/agent-response/:agentId 라우트가 호출) */
@@ -312,6 +325,7 @@ export function hasWorkerSession(agentId: string): boolean {
  * (기존 clearPmSession은 -p 모드용이라 인터랙티브 워커 PTY를 안 건드렸음)
  */
 export function resetWorker(agentId: string): void {
+  wikiGrants.get(agentId)?.revoke(); wikiGrants.delete(agentId);
   const pty = workerPtys.get(agentId);
   if (pty) pty.terminate();
   workerPtys.delete(agentId);

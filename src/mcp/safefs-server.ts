@@ -1,3 +1,4 @@
+import { registerWikiTools } from './wiki-tools.js';
 // SafeFS + SafeBash MCP 서버
 // 모든 파일 접근과 셸 실행을 화이트리스트로 통제
 // 환경변수:
@@ -316,6 +317,7 @@ async function grepFallback(pattern: string, target: string, globPattern?: strin
 const server = new McpServer({ name: "safefs", version: "0.3.1" });
 
 // F1 수정: WRITE_PATHS 없으면 SafeWrite/SafeEdit 미등록
+registerWikiTools(server, process.env.MCP_WIKI_URL, process.env.MCP_WIKI_TOKEN);
 if (WRITE_PATHS.length > 0) {
   server.tool(
     "SafeWrite",
