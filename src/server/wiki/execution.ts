@@ -71,7 +71,9 @@ export class WikiExecution {
       const code = error instanceof CorpusError ? error.code : 'wiki_model_failed';
       save({ ...metadata, state: 'failed', error: code, finishedAt: new Date().toISOString() });
       if (error instanceof CorpusError) throw error;
-      throw new CorpusError(code, 502);
+      const failure = new CorpusError(code, 502);
+      failure.cause = error; // Local diagnostics only; HTTP still returns the stable error code.
+      throw failure;
     } finally { closeSync(fd); rmSync(lock, { force: true }); }
   }
 }

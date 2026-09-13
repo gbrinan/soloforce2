@@ -1,6 +1,6 @@
 # IngesTiger Wiki 운영
 
-설정 → 데이터 → 보존한 자료 → **Wiki 분석·정본**에서 사용합니다. 현재 pin은 [manifest](../../vendor/ingestiger/manifest.json)의 `2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a`, `1.0.0-draft.5`입니다.
+설정 → 데이터 → 보존한 자료 → **Wiki 분석·정본**에서 사용합니다. 현재 pin은 [manifest](../../vendor/ingestiger/manifest.json)의 `2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2`, `1.0.0-draft.6`입니다.
 
 ```mermaid
 flowchart LR
@@ -103,3 +103,9 @@ npm run build
 ```
 
 `test:wiki-product`는 실제 Python·호스트·파일 저장과 합성 모델 응답/검토 결정을 사용합니다. `preview:wiki`는 임시 자료에서 실제 화면/API를 사용하는 브라우저 검증용 서버이며 실제 AI를 호출하지 않습니다. 이 검사는 실제 회사 문서의 의미 품질, 실제 Claude 로그인, Windows 운영, Drive 쓰기 성공을 증명하지 않습니다.
+
+## 실제 호출 확인과 배포
+
+2026-09-14 Mac의 기존 Claude 로그인으로 합성 자료를 실제 호출했다. 원문 언어를 보존하도록 draft.6을 보완하고 재호출·인용 검사를 통과했다. 의미 조건이 부족한 후보는 보류하고 적용일 후보의 정본 반영·ID 재조회만 검증했다. [실호출 기록](../../docs/ingestiger-live-release.md). Windows 실제 실행은 별도다.
+
+명시적으로 실제 모델 호출을 검사하려면 `npm run test:wiki-live -- --confirm-real-call --output <report.json>`을 실행한다. 계정 사용량을 소모하며 합성 자료와 별도 임시 history를 사용한다. 결과 보고서는 후보를 포함하므로 로컬에 보관한다.

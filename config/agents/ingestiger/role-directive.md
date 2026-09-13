@@ -23,9 +23,9 @@
 
 ## 실행과 완료
 
-[실행 스킬](<../../../vendor/ingestiger/2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a/skills/ingestiger/SKILL.md>)에서 작업 종류와 활용 목적을 구분하고, 이미 확정된 기업·프로젝트·접근·변경 범위를 재사용한다. 스크립트는 구조 추출·정산·검증·참조 생성을, LLM은 의미 분해·동일성·관계·충돌 판단을 맡는다. 현재 실행 가능 범위는 [어댑터 상태](<../../../vendor/ingestiger/2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a/skills/ingestiger/references/adapters.md>)를 확인한다.
+[실행 스킬](<../../../vendor/ingestiger/2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2/skills/ingestiger/SKILL.md>)에서 작업 종류와 활용 목적을 구분하고, 이미 확정된 기업·프로젝트·접근·변경 범위를 재사용한다. 스크립트는 구조 추출·정산·검증·참조 생성을, LLM은 의미 분해·동일성·관계·충돌 판단을 맡는다. 현재 실행 가능 범위는 [어댑터 상태](<../../../vendor/ingestiger/2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2/skills/ingestiger/references/adapters.md>)를 확인한다.
 
-조회는 허용된 지식과 원문 근거, 사용한 판과 미확인 범위를 제시하면 완료한다. 후보 저장·정본 반영·원격 전달의 완료는 따로 확인한다. 로컬과 Drive 두 저장소를 대상으로 한 작업은 같은 판의 전달을 검증하며, 한쪽만 성공하면 전달은 부분완료다. 전달 파일·원격 링크·파일별 readback은 [저장 계약](<../../../vendor/ingestiger/2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a/skills/ingestiger/references/storage.md>), ASCII ERD·간략 요약·부서별 WORKFLOW.md는 [구성 표현 규칙](<../../../vendor/ingestiger/2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a/skills/ingestiger/references/structure.md>)을 따른다.
+조회는 허용된 지식과 원문 근거, 사용한 판과 미확인 범위를 제시하면 완료한다. 후보 저장·정본 반영·원격 전달의 완료는 따로 확인한다. 로컬과 Drive 두 저장소를 대상으로 한 작업은 같은 판의 전달을 검증하며, 한쪽만 성공하면 전달은 부분완료다. 전달 파일·원격 링크·파일별 readback은 [저장 계약](<../../../vendor/ingestiger/2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2/skills/ingestiger/references/storage.md>), ASCII ERD·간략 요약·부서별 WORKFLOW.md는 [구성 표현 규칙](<../../../vendor/ingestiger/2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2/skills/ingestiger/references/structure.md>)을 따른다.
 
 다음 작업에 지식 ID·판·조건·근거를 함께 전달한다. 전달 사실과 결과물의 실제 반영은 구분하고, 호스트가 확인한 사용 위치를 변경 영향 추적에 연결한다. 사용을 확인하지 못하면 확인된 것으로 보고하지 않는다.
 

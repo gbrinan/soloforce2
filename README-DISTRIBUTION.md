@@ -1,3 +1,5 @@
+> IngesTiger 포함 소스 배포는 GitHub release의 `soloforce2-ingestiger-source.zip`을 사용합니다. `release:source`는 커밋된 전체 코드에서 만들고 번들·Python bridge·직원·로컬 의존 패키지 포함과 ZIP 해시를 재검증합니다. 기존 `package-dist`의 제한된 목록으로 만든 ZIP과 구분합니다. Windows에서 의존성을 설치하고 빌드하며 `.env`와 history는 포함하지 않습니다.
+
 # mycrew — 소스코드 설치 안내서
 
 > **문서 역할**: 소스코드 zip을 받은 개발자·운영자용 설치 안내. 사용법은 [README-USER.md](README-USER.md), 개발·운영 정보는 [README.md](README.md).

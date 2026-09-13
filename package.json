@@ -36,7 +36,9 @@
     "verify:ingestiger": "node --import tsx scripts/ingestiger-check.ts",
     "test:ingestiger-role": "node --import tsx scripts/ingestiger-role-test.ts",
     "test:wiki-product": "node --import tsx scripts/wiki-product-test.ts",
-    "preview:wiki": "node --import tsx scripts/wiki-preview.ts"
+    "preview:wiki": "node --import tsx scripts/wiki-preview.ts",
+    "test:wiki-live": "node --import tsx scripts/wiki-live-test.ts",
+    "release:source": "node scripts/release-source.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

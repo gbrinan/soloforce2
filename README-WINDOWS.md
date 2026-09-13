@@ -105,7 +105,7 @@ WSL 설치는 Ubuntu 터미널의 실제 소스 폴더에서 Git 업데이트, `
 
 ### 큰 원본·구조 문맥 기능 확인
 
-이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
+이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
 
 `test:corpus`는 새 큰 원본 검사도 포함합니다. 합성 파일을 로컬 파일 탭에서 보관하고 **분석 시작 → 잠시 멈춤 → 분석 이어가기**를 확인합니다. 1,200자 뒤에 예외 문장이 있는 절을 검색해 **절·표의 문맥 함께 읽기**에 예외가 포함되는지 확인하세요. `corpus-1` 기존 자료는 보존 원본을 재등록해야 새 Wiki 준비와 Ask 문맥 확장을 사용할 수 있습니다.
 
@@ -528,3 +528,7 @@ if ($LASTEXITCODE -ne 0) { throw '빌드 실패' }
 ```
 
 위 검사는 합성 모델 응답을 사용합니다. 실제 분석은 현재 로그인한 Claude 계정을 사용하고 사용량을 소모합니다. 설정 → 데이터 → 자료의 Wiki 화면에서 작은 합성 문서 한 개로 분석 → 수용 검토 → 정본 반영 → ID 재조회를 확인하세요. 사용자 자료로 실행하기 전에 해당 PC에서 로그인과 모델 가용성을 확인해야 합니다. [사용·복구 안내](config/wiki/README.md).
+
+### GitHub 소스 배포판 적용
+
+Git 설치는 기존 실행 폴더의 변경 상태를 확인하고 `git pull --ff-only origin main`으로 갱신합니다. ZIP 설치는 GitHub Releases의 `soloforce2-ingestiger-source.zip`을 새 폴더에 풀고 기존 `.env`와 history를 별도로 보존·연결합니다. 두 설치 형태를 섞지 마세요. 패키지에는 Mac node_modules나 계정 정보가 없습니다. 설치 후 `npm.cmd ci` → `npm.cmd run build` → 위 Wiki 검사 → 서버 재시작 순서로 진행합니다.

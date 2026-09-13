@@ -1,15 +1,15 @@
 {
   "repository": "https://github.com/gbrinan/ingestiger",
-  "commit": "2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a",
-  "version": "1.0.0-draft.5",
+  "commit": "2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2",
+  "version": "1.0.0-draft.6",
   "files": [
     {
       "path": ".claude-plugin/plugin.json",
-      "sha256": "66923375c2a70ab332b24424e8886d43d010ef5f1581be11747f856d872465af"
+      "sha256": "7dd8ecaec2112ede4b4fa2574b25a82e126aec1a8bf31dccadb34e57d3641d96"
     },
     {
       "path": "agent/meta.json",
-      "sha256": "e11d0811051c96ee3c77095dec62825935cb040626cb031b5b93abac5ecf365c"
+      "sha256": "03c7e1ea8699ad01ea2578ae7887216b3e97a92c5f2275dd7fe34486ec04dbc3"
     },
     {
       "path": "agent/role-directive.md",
@@ -73,7 +73,7 @@
     },
     {
       "path": "skills/ingestiger/scripts/pipeline.py",
-      "sha256": "4ef018be47244fb07ed79d01e9488a11282e825c4b39e4cbdb28d97b00f0434c"
+      "sha256": "b6128f3b361cf3175e51187259fdfce52020c9b862904adca6fdfc9d236a6c7f"
     }
   ]
 }
