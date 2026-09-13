@@ -31,7 +31,7 @@ import {
 } from "./pm-memory.js";
 import { transitionTodosForJob, appendNoteForJob, advanceTodoStageForJob, linkJobToTodo, setTodoState, setTodoAgentNameForJob, getTodosByJobId } from "./todos.js";
 import { PROJECTS_DIR, PROJECT_SELF_DIR, CLAUDE_BIN_DIR, HISTORY_DIR, TSX_BIN, TSX_CLI_ARGS } from "../config.js";
-import { routeToAgent, getWorkerAgent, getDefaultAgent, getAllWorkerAgents, toAgentConfig, resolveWorkerRuntime, type WorkerAgentDef } from "../agent-registry.js";
+import { routeToAgent, getWorkerAgent, getDefaultAgent, getAllWorkerAgents, toAgentConfig, resolveWorkerRuntime, resolveNewWorkerId, type WorkerAgentDef } from "../agent-registry.js";
 
 // AX: 중첩 프로젝트 경로 해석 — 최대 2단(예: "ax/australia-lng"), traversal 차단.
 // SPEC-AX-NESTED-PROJECTS-001 R1/R3. 기존 1단 이름은 동일하게 동작한다.
@@ -835,6 +835,8 @@ export function createJob(
   todoId?: string,
   effort?: string,
 ): Job {
+  agent = agent ? resolveNewWorkerId(agent) : undefined;
+  stageAgents = stageAgents?.map(resolveNewWorkerId);
   // 미등록 agent id 거부 — 통과시키면 실행 시점에 조용히 자동 라우팅으로 폴백해
   // 엉뚱한 직원에게 배정된다(2026-08-08 "backend" 사고). 생성 시점에 막는 게 맞다.
   if (agent && !getWorkerAgent(agent)) {

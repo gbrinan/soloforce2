@@ -91,6 +91,8 @@ export interface GatewayRunOptions {
   onText?: (delta: string) => void;
   /** P1-③: 프로바이더 선택 — 기본 claude. ollama는 로컬 무료(비용 0), 실패 시 claude 폴백 */
   provider?: "claude" | "ollama";
+  /** Structured ingestion: no tools, MCP, slash commands, persistence or warm-up calls. */
+  isolatedText?: boolean;
 }
 
 // 프롬프트는 stdin(`-p -`)으로 전달해 대용량(디자인 클론 등)에서도 argv 한도에 걸리지 않게 한다.
@@ -184,15 +186,16 @@ function extractTextDelta(ev: unknown): string | null {
 
 const warmPool = new Map<string, WarmEntry>();
 
-function buildBaseArgs(opts: GatewayRunOptions): string[] {
+export function buildBaseArgs(opts: GatewayRunOptions): string[] {
   const args: string[] = [];
+  if (opts.isolatedText) args.push('--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--disable-slash-commands', '--no-session-persistence');
   args.push("--model", opts.model || GW_DEFAULT_MODEL);
   if (opts.systemPrompt) args.push("--append-system-prompt", opts.systemPrompt);
   if (opts.maxTurns) args.push("--max-turns", String(opts.maxTurns));
   if (opts.permissionMode) args.push("--permission-mode", opts.permissionMode);
   if (opts.disallowedTools?.length) args.push("--disallowedTools", opts.disallowedTools.join(","));
   if (opts.allowedTools?.length) args.push("--allowedTools", opts.allowedTools.join(","));
-  if (GW_SKIP_SETTINGS) args.push("--setting-sources", "");
+  if (GW_SKIP_SETTINGS || opts.isolatedText) args.push("--setting-sources", "");
   return args;
 }
 
@@ -318,7 +321,7 @@ export async function runGatewayClaude(opts: GatewayRunOptions): Promise<Gateway
   try {
     // 1) 워밍 프로세스가 준비돼 있으면 두 번째 턴으로 즉시 처리 (~2초)
     const warm = warmPool.get(key);
-    if (WARM_POOL_ENABLED && warm?.state === "ready") {
+    if (!opts.isolatedText && WARM_POOL_ENABLED && warm?.state === "ready") {
       try {
         const result = await runOnWarm(warm, opts);
         ensureWarm(key, baseArgs); // 다음 요청 대비 보충
@@ -328,7 +331,7 @@ export async function runGatewayClaude(opts: GatewayRunOptions): Promise<Gateway
       }
     }
     // 2) 콜드 경로 (설정 미로드로 기존 대비 단축) + 다음 요청 대비 워밍 스폰
-    ensureWarm(key, baseArgs);
+    if (!opts.isolatedText) ensureWarm(key, baseArgs);
     // 스트리밍 요청은 콜드에서도 stream-json으로 델타를 흘린다 (P0-②)
     const outputArgs = opts.onText
       ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]

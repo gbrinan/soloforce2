@@ -58,7 +58,7 @@ flowchart TD
     P -->|업무 조건 채택 검토| D
 ```
 
-그림의 지식 확정·작업 근거·반영 위치·영향 확인·관계 검토·가치 평가·Drive 복제는 후속 구현 대상입니다. 현재 로컬 어댑터는 원본 선택 → 요청 준비 → LLM JSON 응답 검사 → 후보 보존까지 연결합니다.
+2026-09-14 제품 반영에서는 원본 선택 → 요청 준비 → 호스트 모델 실행 → 후보 → 인간 의미 검토 → 단일 후보의 안정 ID·snapshot 반영 → ID 재조회를 연결했습니다. 현재 운영 계약은 [Wiki 안내](../config/wiki/README.md)입니다. 그림의 작업 근거 자동 전달·반영 위치·영향 확인·관계 검토·가치 평가·Drive 복제는 후속 범위입니다.
 
 **현재 기반과 반드시 보완할 경계**
 
@@ -105,7 +105,7 @@ flowchart TD
 | 검색·그래프·벡터 | 지정된 Wiki/source 판에서 만든 색인과 관계 투영 | 탐색과 정렬. 지식 승인 권한은 없음 |
 | Drive·Notion의 결과 표시 | 완성 snapshot의 복제 또는 검토용 뷰 | 원본 연결·보관·표시. 별개의 current를 편집하지 않음 |
 
-기존 IngesTiger [데이터 계약](../vendor/ingestiger/4c876bbecd0f727386c792976dee21479328cac1/skills/ingestiger/references/contracts.md)과 [저장 계약](../vendor/ingestiger/4c876bbecd0f727386c792976dee21479328cac1/skills/ingestiger/references/storage.md)을 확장합니다. 공통 schema·의미 검토·commit 로직은 IngesTiger upstream에서 한 번 정의하고 호스트가 그 버전을 고정해 호출합니다. Soloforce2에 별도 의미 엔진을 복제하지 않습니다. 현재 upstream에 없는 commit 엔진은 새 구현이 필요합니다.
+기존 IngesTiger [데이터 계약](../vendor/ingestiger/4c876bbecd0f727386c792976dee21479328cac1/skills/ingestiger/references/contracts.md)과 [저장 계약](../vendor/ingestiger/4c876bbecd0f727386c792976dee21479328cac1/skills/ingestiger/references/storage.md)을 확장합니다. 공통 schema·의미 검토·commit 로직은 IngesTiger upstream에서 한 번 정의하고 호스트가 그 버전을 고정해 호출합니다. Soloforce2에 별도 의미 엔진을 복제하지 않습니다. draft.5 upstream의 knowledge.py가 단일 후보 정본 파일을 구성하고 호스트가 writer lock·journal·current 교체를 수행합니다. 아래의 관계·일괄 갱신·은퇴는 확장이 필요합니다.
 
 **지식·변경·사용 이력의 최소 계약**
 
@@ -381,7 +381,7 @@ Windows 검증 대상은 Python 실행 경로, 한글·공백 경로, NTFS 파�
 
 단계 1a–1b는 관계·가치 평가 요청의 경로이며 기본 단일 조건 적용을 막는 필수 의존성은 아닙니다. 정본 확정이 준비되기 전 실험은 탐색용 후보 상태로 제한합니다.
 
-현재 JSON 수동 왕복은 단계 1~3의 합성/소규모 검증에 사용할 수 있습니다. 일상적인 제품 흐름의 완료 기준에는 단계 4의 호스트 모델 연결을 포함합니다. 자동화를 붙여도 원문 범위 밖의 주장을 확정하지 않는 검토 계약은 유지합니다.
+JSON 수동 왕복은 보조 경로로 유지합니다. 제품 Wiki 화면은 선택 요청을 기존 Claude 로그인으로 직접 실행합니다. 자유 형식 직원의 자동 Wiki 도구 할당·인계와 실제 Windows 모델 검증은 후속 범위입니다. 자동화를 붙여도 원문 범위 밖의 주장을 확정하지 않는 검토 계약은 유지합니다.
 
 제안 API는 다음과 같습니다. 기존 `/api/wiki/prepare`, `/submit`, 후보 조회·백업과 구분하며 아직 구현되지 않았습니다.
 

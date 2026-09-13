@@ -36,3 +36,21 @@ export interface WikiJob {
 export interface WikiJobSummary {
   id: string; sourceState: 'unchanged' | 'changed'; candidateCount: number; requestCount: number;
 }
+
+export interface WikiReview {
+  id: string; scope: WikiScope; jobId: string; candidateId: string; unitId: string; needIndex: number;
+  verdict: 'accept' | 'hold' | 'reject'; reason: string; conditionsChecked: boolean;
+  reviewer: string; recordedAt: string; baseSnapshot: string | null;
+  knowledgeId: string; expectedRevision: number | null; coverage: WikiPayload['coverage'];
+}
+export interface WikiKnowledge {
+  id: string; revision: number; kind: string; owner_scope: WikiScope;
+  title: string; statement: string; details: string[]; departments: string[]; domains: string[];
+  patterns: string[]; evidence: string[]; claim_status: 'source_reported'; lifecycle: 'current';
+  semantic_review: 'accepted'; recorded_at: string; valid_from: 'unknown'; valid_to: 'unknown';
+  provenance: { source_id: string; source_revision: string; locator: string; evidence_kind: 'EXTRACTED';
+    corpus_source_id: string; corpus_revision: string };
+  origin: { jobId: string; candidateId: string; unitId: string; needIndex: number }; review_id: string;
+  conditions: { status: 'human_checked_selected_units'; coverage: WikiPayload['coverage']; unread_dependencies: 'unverified'; note: string };
+}
+export interface WikiKnowledgeView { snapshot: string; knowledge: WikiKnowledge; sourceState: 'unchanged' | 'changed' }

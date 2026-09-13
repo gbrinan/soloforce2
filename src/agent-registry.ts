@@ -345,8 +345,14 @@ export function getWorkerAgent(id: string): WorkerAgentDef | undefined {
   return loadAgents().find((a) => a.id === id);
 }
 
+/** New assignments only. Existing job IDs and history keep their original worker. */
+export function resolveNewWorkerId(id: string): string {
+  return id === 'ingest-crab' && getWorkerAgent('ingestiger') ? 'ingestiger' : id;
+}
+
 export function getDefaultAgent(): WorkerAgentDef | undefined {
-  return loadAgents().find((a) => a.isDefault);
+  const agent = loadAgents().find((a) => a.isDefault);
+  return agent ? getWorkerAgent(resolveNewWorkerId(agent.id)) ?? agent : undefined;
 }
 
 export interface RouteCandidate {
@@ -435,8 +441,9 @@ export function routeToAgent(request: string, projectName?: string): WorkerAgent
     return undefined;
   }
 
-  console.log(`[Route] "${request.slice(0, 60)}" → ${winner.agent.name} (keyword: "${winner.keyword}")`);
-  return winner.agent;
+  const selected = getWorkerAgent(resolveNewWorkerId(winner.agent.id)) ?? winner.agent;
+  console.log(`[Route] "${request.slice(0, 60)}" → ${selected.name} (keyword: "${winner.keyword}")`);
+  return selected;
 }
 
 export function toAgentConfig(def: WorkerAgentDef): AgentConfig {

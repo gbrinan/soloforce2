@@ -69,7 +69,7 @@ git log -1 --oneline
 
 ### 4. 설치·검증·실행
 
-IngesTiger Wiki 후보 기능을 사용하려면 Python 3도 준비합니다. PowerShell에서 `python --version`을 확인하세요. 실행명이 다르면 `py -3 -c "import sys; print(sys.executable)"`로 경로를 확인하고 `.env`의 `INGESTIGER_PYTHON`에 실제 실행 파일 경로를 적습니다. 인자와 바깥 따옴표는 넣지 않습니다. [Wiki 후보 사용법](config/wiki/README.md)
+IngesTiger Wiki 분석·정본 기능을 사용하려면 Python 3도 준비합니다. PowerShell에서 `python --version`을 확인하세요. 실행명이 다르면 `py -3 -c "import sys; print(sys.executable)"`로 경로를 확인하고 `.env`의 `INGESTIGER_PYTHON`에 실제 실행 파일 경로를 적습니다. 인자와 바깥 따옴표는 넣지 않습니다. [Wiki 후보 사용법](config/wiki/README.md)
 
 같은 소스 폴더의 PowerShell에서 실행합니다. `npm.cmd`를 사용하므로 `npm.ps1` 실행을 위해 시스템 실행 정책을 바꿀 필요가 없습니다. `npm ci`는 기존 `node_modules`를 재설치하므로 서버가 종료된 상태에서 진행합니다.
 
@@ -105,7 +105,7 @@ WSL 설치는 Ubuntu 터미널의 실제 소스 폴더에서 Git 업데이트, `
 
 ### 큰 원본·구조 문맥 기능 확인
 
-이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `510f23fcf1ed30a3202e16a072332e6adc8e81aa`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
+이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
 
 `test:corpus`는 새 큰 원본 검사도 포함합니다. 합성 파일을 로컬 파일 탭에서 보관하고 **분석 시작 → 잠시 멈춤 → 분석 이어가기**를 확인합니다. 1,200자 뒤에 예외 문장이 있는 절을 검색해 **절·표의 문맥 함께 읽기**에 예외가 포함되는지 확인하세요. `corpus-1` 기존 자료는 보존 원본을 재등록해야 새 Wiki 준비와 Ask 문맥 확장을 사용할 수 있습니다.
 
@@ -509,3 +509,22 @@ My Crew를 설치 후 PC를 재부팅하거나 서버를 다시 시작해야 할
 ---
 
 *My Crew 설치 안내서 v1.0 | 캡처 이미지는 추후 업데이트 예정*
+
+### Wiki 제품 흐름 검사
+
+받은 코드가 위 manifest의 판인지 확인한 다음 실행 소스 폴더에서 아래 검사를 실행합니다. `.env`와 `history/`를 유지하고 Windows에서 의존성을 설치하세요. Mac의 node_modules는 복사하지 않습니다.
+
+```powershell
+python --version
+if ($LASTEXITCODE -ne 0) { throw 'Python 경로를 확인하세요.' }
+npm run verify:ingestiger
+if ($LASTEXITCODE -ne 0) { throw '배포 파일 검증 실패' }
+npm run test:wiki-product
+if ($LASTEXITCODE -ne 0) { throw 'Wiki 제품 흐름 검사 실패' }
+npm run test:wiki
+if ($LASTEXITCODE -ne 0) { throw 'Wiki HTTP 검사 실패' }
+npm run build
+if ($LASTEXITCODE -ne 0) { throw '빌드 실패' }
+```
+
+위 검사는 합성 모델 응답을 사용합니다. 실제 분석은 현재 로그인한 Claude 계정을 사용하고 사용량을 소모합니다. 설정 → 데이터 → 자료의 Wiki 화면에서 작은 합성 문서 한 개로 분석 → 수용 검토 → 정본 반영 → ID 재조회를 확인하세요. 사용자 자료로 실행하기 전에 해당 PC에서 로그인과 모델 가용성을 확인해야 합니다. [사용·복구 안내](config/wiki/README.md).

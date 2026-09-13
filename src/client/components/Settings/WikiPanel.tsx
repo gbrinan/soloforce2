@@ -2,8 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Paper, ScrollArea, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import type { CorpusSnapshot } from '../../../shared/corpus';
 import type { WikiJob, WikiJobSummary } from '../../../shared/wiki';
+import WikiKnowledgePanel from './WikiKnowledgePanel';
 
 const errors: Record<string, string> = {
+  wiki_snapshot_conflict: '정본이 그사이 변경되었습니다. 새로 조회하고 최신 판을 기준으로 다시 검토하세요.',
+  wiki_snapshot_invalid: '정본 파일 검증에 실패했습니다. 현재 판과 백업을 확인하세요.',
+  wiki_semantic_review_required: '모호한 후보를 해소하고 원문·세부 조건 검토를 기록해야 정본에 반영할 수 있습니다.',
+  wiki_review_superseded: '이후의 검토 결정이 있습니다. 최신 결정을 확인하세요.',
+  wiki_writer_locked: '다른 정본 작업이 진행 중이거나 중단된 잠금이 있습니다. 운영 문서의 복구 절차를 확인하세요.',
+  wiki_analysis_locked: '이 요청은 분석 중이거나 중단된 실행 잠금이 있습니다. 실행 기록을 확인하세요.',
+  wiki_model_failed: '연결된 Claude 실행에 실패했습니다. 로그인·모델 설정을 확인한 뒤 해당 요청을 다시 실행하세요.',
+  wiki_model_invalid_json: '모델 응답이 올바른 JSON이 아닙니다. 후보로 반영되지 않았습니다. 요청을 나누거나 수동 응답을 사용하세요.',
+  wiki_model_request_mismatch: '모델이 다른 요청 ID를 반환했습니다. 이 응답은 저장하지 않았습니다.',
+  wiki_model_mismatch: '현재 호스트 모델과 요청의 모델 표기가 다릅니다. 현재 모델로 새 요청을 준비하거나 수동 응답을 사용하세요.',
+  wiki_model_budget_exceeded: '설정된 일일 AI 예산을 모두 사용했습니다.',
   owner_same_origin_required: '이 기기의 로컬 화면 또는 로그인한 화면에서 이용하세요.',
   wiki_python_unavailable: 'Python을 실행할 수 없습니다. 설치 후 INGESTIGER_PYTHON 실행 경로를 확인하세요.',
   wiki_bundle_invalid: 'IngesTiger 배포 파일이 변경되었거나 누락되었습니다. 설치 파일을 확인하세요.',
@@ -48,9 +60,10 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
   const scopeReady = [orgId, projectId].every(value => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(value));
   useEffect(() => {
     let live = true;
-    void api<{ available: boolean; error?: string }>('/capabilities').then(value => {
+    void api<{ available: boolean; error?: string; model?: string }>('/capabilities').then(value => {
       if (!live) return;
       setAvailable(value.available);
+      if (value.model) setModel(value.model);
       if (!value.available) setError(errors[value.error ?? ''] ?? 'Wiki 실행 환경이 준비되지 않았습니다.');
     }).catch(error => { if (live) setError(error.message); });
     return () => { live = false; };
@@ -65,8 +78,8 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
   const currentRequest = job?.payload.requests.find(request => request.request_id === requestId);
   const scopeQuery = new URLSearchParams({ orgId: job?.payload.scope.orgId ?? orgId, projectId: job?.payload.scope.projectId ?? projectId }).toString();
   return <Paper p="md" withBorder><Stack gap="sm">
-    <Group justify="space-between"><Text fw={600}>{snapshot.name} · LLM Wiki 후보</Text><Button variant="subtle" size="xs" onClick={close}>닫기</Button></Group>
-    <Text size="sm">절·페이지·표 행을 골라 현재 사용하는 LLM에 요청하세요. 제목과 표 헤더를 함께 전달하며, 큰 단위는 잘라내지 않고 보류합니다. 의미 검토와 정본 반영, Drive 저장은 별도 단계입니다.</Text>
+    <Group justify="space-between"><Text fw={600}>{snapshot.name} · IngesTiger Wiki</Text><Button variant="subtle" size="xs" onClick={close}>닫기</Button></Group>
+    <Text size="sm">절·페이지·표 행을 선택하고 분석을 실행한 뒤 후보를 검토해 정본에 반영하세요. 큰 단위는 잘라내지 않고 보류합니다. Drive 자동 저장은 아직 연결되지 않았습니다.</Text>
     {!snapshot.units && <Alert color="yellow">구조 단위가 없는 이전 추출판입니다. 자료를 다시 가져온 뒤 후보를 만드세요. 기존 원본과 후보는 유지됩니다.</Alert>}
     {error && <Alert color="red" role="alert">{error}</Alert>}
     {notice && <Alert color="teal" role="status">{notice}</Alert>}
@@ -74,7 +87,7 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
       <TextInput label="기업 ID" description="영문 소문자·숫자·밑줄·하이픈, 예: example. con·aux 등 예약어는 제외합니다." value={orgId} disabled={busy} onChange={event => { setOrgId(event.currentTarget.value); resetScope(); }} />
       <TextInput label="프로젝트 ID" description="예: training-2026. 기존 ID가 있으면 유지하세요." value={projectId} disabled={busy} onChange={event => { setProjectId(event.currentTarget.value); resetScope(); }} />
     </Group>
-    <TextInput label="분석에 사용할 모델 표기" description="현재 사용할 LLM의 모델·설정을 적습니다. 이 화면에서 유료 API를 호출하지 않습니다." value={model} disabled={busy} onChange={event => setModel(event.currentTarget.value)} maxLength={120} />
+    <TextInput label="분석 모델" description="기본값은 호스트에 설정한 Claude 모델입니다. 분석 실행은 현재 로그인 계정의 사용량을 소모합니다. 다른 모델 표기는 수동 응답 경로에서 사용하세요." value={model} disabled={busy} onChange={event => setModel(event.currentTarget.value)} maxLength={120} />
     <Group><Text size="sm">분석 범위: {selected.length} / {units.length}개 구조 단위</Text>
       <Button size="xs" variant="light" disabled={busy || units.length > 500} onClick={() => { setSelected(units.map(unit => unit.id)); setScopeConfirmed(false); }}>이 자료 전체 선택</Button>
       <Button size="xs" variant="subtle" disabled={busy} onClick={() => { setSelected([]); setScopeConfirmed(false); }}>선택 해제</Button></Group>
@@ -92,7 +105,7 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
     <Group>
       <Button disabled={busy || !available || !scopeReady || !scopeConfirmed || !model.trim() || !selected.length || selected.length > 500} onClick={() => void run(async () => {
         const value = await api<{ job: WikiJob }>('/prepare', { scope: { orgId, projectId }, sourceId: snapshot.sourceId, expectedRevision: snapshot.revision, unitIds: selected, model });
-        open(value.job); setNotice('분석 요청을 준비했습니다. 각 요청을 LLM에 전달하고 응답 JSON을 아래에 붙여넣으세요.');
+        open(value.job); setNotice('분석 요청을 준비했습니다. 아래에서 요청별 분석을 실행하세요.');
       })}>분석 요청 준비</Button>
       <Button variant="light" disabled={busy || !scopeReady} onClick={() => void run(async () => {
         const query = new URLSearchParams({ orgId, projectId, sourceId: snapshot.sourceId });
@@ -103,11 +116,15 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
       open((await api<{ job: WikiJob }>(`/jobs/${saved.id}?${new URLSearchParams({ orgId, projectId })}`)).job);
     })}>작업 {saved.id.slice(0, 10)} · 후보 응답 {saved.candidateCount}개 · {saved.sourceState === 'changed' ? '원본 변경됨' : '원본 판 일치'}</Button>)}
     {job && <Stack gap="sm">
-      <Group><Badge color="yellow">의미 검토 대기</Badge><Text size="xs">요청 {job.payload.requests.length}개 · 후보 응답 {job.candidates.length}개 · 미선택 {job.payload.coverage.omittedUnitIds.length}개</Text></Group>
+      <Group><Badge color="blue">{job.candidates.length ? '후보 저장됨' : '요청 준비됨'}</Badge><Text size="xs">요청 {job.payload.requests.length}개 · 후보 응답 {job.candidates.length}개 · 미선택 {job.payload.coverage.omittedUnitIds.length}개</Text></Group>
       {!!job.payload.coverage.pendingUnits?.length && <Alert color="yellow">{job.payload.coverage.pendingUnits.length}개 구조 단위가 입력 한도를 넘어 보류됐습니다. 해당 절·표의 범위를 다시 나눠야 하며, 이 작업을 자료 전체 분석 완료로 사용하지 마세요.</Alert>}
       {job.payload.coverage.pendingRoutes.length > 0 && <Alert color="yellow">추가 처리 대상: {job.payload.coverage.pendingRoutes.join(', ')}. 읽지 않은 이미지·첨부·음성은 분석 완료에 포함하지 않습니다.</Alert>}
       {job.sourceState === 'changed' && <Alert color="yellow">원본이 변경된 이전 작업입니다. 새 응답을 저장하려면 최신 자료에서 다시 준비하세요.</Alert>}
-      <Select label="LLM에 전달할 요청" data={job.payload.requests.map((request, index) => ({ value: request.request_id, label: `요청 ${index + 1} · ${request.units.length}개 단위` }))} value={requestId} onChange={value => { setRequestId(value); setResponse(''); }} />
+      <Select label="분석할 요청" disabled={busy} data={job.payload.requests.map((request, index) => ({ value: request.request_id, label: `요청 ${index + 1} · ${request.units.length}개 단위${job.candidates.some(candidate => candidate.requestId === request.request_id) ? ' · 후보 저장됨' : ''}` }))} value={requestId} onChange={value => { setRequestId(value); setResponse(''); }} />
+      <Button loading={busy} disabled={busy || !currentRequest || job.sourceState !== 'unchanged'} onClick={() => void run(async () => {
+        const result = await api<{ job: WikiJob; reused: boolean }>(`/jobs/${job.id}/analyze`, { scope: job.payload.scope, requestId });
+        setJob(result.job); setNotice(result.reused ? '이미 저장된 후보를 불러왔습니다. 모델을 다시 호출하지 않았습니다.' : '분석과 인용 검사를 마쳤습니다. 아래에서 후보 의미를 검토하세요.');
+      })}>선택한 요청 분석 실행</Button>
       {currentRequest && <details><summary>분석 요청 JSON 펼치기</summary><Textarea label="분석 요청 JSON" readOnly value={JSON.stringify(currentRequest)} autosize minRows={4} maxRows={10} /></details>}
       <Group><Button variant="light" disabled={!currentRequest} onClick={() => void run(async () => {
         await navigator.clipboard.writeText(JSON.stringify(currentRequest)); setNotice('요청 JSON을 복사했습니다. 사용 중인 LLM에 전달하고 JSON 응답을 받아오세요. 모델의 실제 입력 한도는 별도로 확인하세요.');
@@ -120,6 +137,7 @@ export default function WikiPanel({ snapshot, close }: { snapshot: CorpusSnapsho
         const value = await api<{ job: WikiJob }>(`/jobs/${job.id}/submit`, { scope: job.payload.scope, response: parsed });
         setJob(value.job); setResponse(''); setNotice('인용·누락·중복 검사를 통과한 후보를 저장했습니다. 의미 정확성과 업무 승인은 아직 검토 전입니다.');
       })}>응답 검사하고 후보 저장</Button>
+      <WikiKnowledgePanel key={job.id} job={job} api={api} />
       {job.candidates.map(candidate => <Paper key={candidate.id} withBorder p="sm"><Stack gap="xs">
         <Text size="xs" c="dimmed">후보 판 {candidate.id.slice(0, 10)} · 니즈 {candidate.validation.needs}개 · 모호한 단위 {candidate.validation.ambiguous_units.length}개</Text>
         {candidate.response.results.flatMap(result => result.needs.map((need, index) => <div key={`${result.unit_id}-${index}`}>

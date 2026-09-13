@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PROJECT_SELF_DIR } from '../../config.js';
 import { CorpusError, hash } from '../corpus/extract.js';
 
-export const UPSTREAM_COMMIT = '510f23fcf1ed30a3202e16a072332e6adc8e81aa';
+export const UPSTREAM_COMMIT = '2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a';
 export function verifyWikiBundle(): void {
   const root = join(PROJECT_SELF_DIR, 'vendor', 'ingestiger');
   const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
@@ -13,7 +13,9 @@ export function verifyWikiBundle(): void {
     if (!/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/.test(file.path) || file.path.split('/').includes('..')) throw new CorpusError('wiki_bundle_invalid', 503);
     if (hash(readFileSync(join(root, UPSTREAM_COMMIT, file.path))) !== file.sha256) throw new CorpusError('wiki_bundle_invalid', 503);
   }
-  if (!manifest.files.some((file: { path: string }) => file.path === 'skills/ingestiger/scripts/pipeline.py')) throw new CorpusError('wiki_bundle_invalid', 503);
+  for (const name of ['pipeline.py', 'knowledge.py']) {
+    if (!manifest.files.some((file: { path: string }) => file.path === `skills/ingestiger/scripts/${name}`)) throw new CorpusError('wiki_bundle_invalid', 503);
+  }
 }
 
 /** No shell, model API, or caller-provided executable/path. Python stdout is UTF-8 on Windows too. */

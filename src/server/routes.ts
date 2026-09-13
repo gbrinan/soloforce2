@@ -730,7 +730,7 @@ export function registerRoutes(app: Hono): void {
 
     let job: ReturnType<typeof createJob> | null = null;
     if (body.delegate && reconciliation.toProcess > 0) {
-      job = createJob(request, project, undefined, body.agent?.trim() || "ingest-crab");
+      job = createJob(request, project, undefined, body.agent?.trim() || "ingestiger");
     }
     return c.json({
       project,

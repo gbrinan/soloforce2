@@ -34,7 +34,9 @@
     "test:corpus-reader": "node --import tsx scripts/corpus-structure-test.ts && node --import tsx scripts/corpus-intake-test.ts",
     "sync:ingestiger": "node --import tsx scripts/ingestiger-sync.ts",
     "verify:ingestiger": "node --import tsx scripts/ingestiger-check.ts",
-    "test:ingestiger-role": "node --import tsx scripts/ingestiger-role-test.ts"
+    "test:ingestiger-role": "node --import tsx scripts/ingestiger-role-test.ts",
+    "test:wiki-product": "node --import tsx scripts/wiki-product-test.ts",
+    "preview:wiki": "node --import tsx scripts/wiki-preview.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

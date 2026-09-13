@@ -1,15 +1,15 @@
 {
   "repository": "https://github.com/gbrinan/ingestiger",
-  "commit": "510f23fcf1ed30a3202e16a072332e6adc8e81aa",
-  "version": "1.0.0-draft.4",
+  "commit": "2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a",
+  "version": "1.0.0-draft.5",
   "files": [
     {
       "path": ".claude-plugin/plugin.json",
-      "sha256": "fa083f1ef78cd6fb71083c0f5f5d3e42147ae00a63d5c2deaba1db92f8ef0805"
+      "sha256": "66923375c2a70ab332b24424e8886d43d010ef5f1581be11747f856d872465af"
     },
     {
       "path": "agent/meta.json",
-      "sha256": "418f85851e596b716e5a348a5f89a3992fb0e7d8a7c6f5a17b2ffeea8072fc80"
+      "sha256": "e11d0811051c96ee3c77095dec62825935cb040626cb031b5b93abac5ecf365c"
     },
     {
       "path": "agent/role-directive.md",
@@ -21,11 +21,11 @@
     },
     {
       "path": "skills/ingestiger/references/adapters.md",
-      "sha256": "88c080b047d95394cbfa73ff1dd43ef2ee8ade07197c3e2085724500da080a99"
+      "sha256": "d7eef040f8f33c13f9ee98c188ff0292451ca6f3b54cc0ab55c68b4abf43891f"
     },
     {
       "path": "skills/ingestiger/references/contracts.md",
-      "sha256": "f7ff850e7f9e2e4fc7c26e0889b86c202751d030e12e1700a433e0967cc5718d"
+      "sha256": "8f6a2eadd692519adfa6702e625e1a8c7b09dac94ec60f74e7e0c217fc32abd0"
     },
     {
       "path": "skills/ingestiger/references/golden-samples.md",
@@ -41,7 +41,7 @@
     },
     {
       "path": "skills/ingestiger/references/runbook.md",
-      "sha256": "a3e11bacd5944fba9908f97785e58acddf36f4f3865f6a119b90b5ae8d1acd85"
+      "sha256": "709b486ffcd64fd07654c2d82c7730f43611153b71afc758edbec62000f81bb1"
     },
     {
       "path": "skills/ingestiger/references/source-quality.md",
@@ -62,6 +62,10 @@
     {
       "path": "skills/ingestiger/scripts/golden.py",
       "sha256": "5dbb7cee4d6fe4b74065742b353bd8d49ca4df7e34e98ad9da76d5b375efba3b"
+    },
+    {
+      "path": "skills/ingestiger/scripts/knowledge.py",
+      "sha256": "ee330c373ab83f847ca3bf4861c2d66e8adfdf77623ef4361f9bc3131c1a7d5e"
     },
     {
       "path": "skills/ingestiger/scripts/link_audit.py",

@@ -1,3 +1,5 @@
+> 아래는 draft.4 역할 연결 검증의 당시 기록입니다. draft.5의 분석·검토·정본·재조회 구현과 현재 pin은 [제품 운영 안내](../config/wiki/README.md)를 따릅니다.
+
 # IngesTiger 역할 반영 확인
 
 2026-09-14, 역할·계약과 직원 등록 경로를 연결했습니다. 고정 버전은 `1.0.0-draft.4`, upstream commit은 `510f23fcf1ed30a3202e16a072332e6adc8e81aa`입니다. 정확한 배포 파일과 해시는 [manifest](../vendor/ingestiger/manifest.json)에 있습니다.

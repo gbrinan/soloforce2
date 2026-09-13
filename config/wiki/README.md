@@ -1,107 +1,105 @@
-# IngesTiger LLM Wiki 후보 연결
+# IngesTiger Wiki 운영
 
-후속 방향은 [업무 지식 연결 설계](../../docs/ingestiger-workflow-design.md)에 정리했습니다. 이 안내의 후보 저장 기능과 후속 설계 v2의 정본 확정·관계 검토·목적별 가치 판별·작업 적용·영향 추적을 구분해 읽으세요.
+설정 → 데이터 → 보존한 자료 → **Wiki 분석·정본**에서 사용합니다. 현재 pin은 [manifest](../../vendor/ingestiger/manifest.json)의 `2b253de4de45c6ca844bbb5bb6aa3624bf6ee58a`, `1.0.0-draft.5`입니다.
 
-설정 → 데이터 → 보존한 자료 → **Wiki 후보 만들기**에서 사용합니다. 기존 Drive·Notion·로컬 자료의 원본 판을 고정하고, 선택한 절·슬라이드·표 행 등 구조 단위를 IngesTiger에 전달합니다. 검색 조각의 1,200자 경계는 분석 단위로 사용하지 않습니다. 사용 중인 LLM이 작성한 응답을 검사해 기업·프로젝트별 후보로 보존합니다.
+```mermaid
+flowchart LR
+  A[Drive · Notion · 로컬 자료] --> B[원본 코퍼스 · 판 보존]
+  B --> C[자료 종류별 추출 · 구조 단위 선택]
+  C --> D[IngesTiger 호스트 분석 실행]
+  D --> E[인용 검사 · 지식 후보]
+  E --> F[사용자 의미 검토]
+  F -->|수용 결정 반영| G[안정 ID · 판을 가진 정본]
+  F -->|보류 · 반려| H[검토 기록 보존]
+  G --> I[같은 ID · 조건 · 근거 재조회]
+  I -. 조인·집계 요청 시 .-> J[corpus-keeper]
+```
 
-기준은 [고정한 IngesTiger 번들](../../vendor/ingestiger/manifest.json)의 로컬 commit `510f23fcf1ed30a3202e16a072332e6adc8e81aa`, 버전 `1.0.0-draft.4`입니다. 이 버전의 CLI 범위인 요청 준비·응답 검사·후보 저장을 연결했습니다. 정본 승격, 안정 knowledge ID 부여, 자동 모델 호출, Drive 쓰기 동기화, 전체 에이전트의 Wiki 도구 자동 할당은 구현 범위에 포함하지 않습니다.
-
-[인제스트타이거 직원 등록](../agents/ingestiger/README.md)도 제공합니다. 직원의 전체 역할과 이 화면의 단위 분석 프롬프트는 각 실행 단계에서 사용합니다. 적용 여부는 [역할 반영 확인](../../docs/ingestiger-role-verification.md)에서 검사합니다.
+원본·추출물의 코퍼스와 검토된 Wiki 정본은 별도 저장소입니다. 검색의 1,200자 조각을 지식 단위로 삼지 않고 절·슬라이드·표 행을 전달합니다. 자료 크기·미디어 보류 정책은 [원본 판독 안내](../../docs/corpus-source-reader.md)를 따릅니다.
 
 ## 사용 순서
 
-1. 기존 자료 수집 화면에서 파일이나 페이지를 등록합니다. 형식별 처리 범위는 [코퍼스 안내](../corpus/README.md)를 따릅니다.
-2. 자료의 **Wiki 후보 만들기**를 누릅니다. 기업·프로젝트 ID와 실제 사용할 모델 표기를 입력합니다. 기존 ID가 있으면 같은 값을 사용합니다.
-3. 원문 구조 단위를 펼쳐 분석할 절·표 행을 선택합니다. `corpus-1` 자료는 구조 단위가 없으므로 보존 원본을 재등록해야 합니다. 여러 기업이 섞인 파일은 해당 기업의 단위만 선택합니다. 선택한 자료의 소유 범위를 확인한 뒤 **분석 요청 준비**를 누릅니다.
-4. **분석 요청 복사**로 받은 JSON을 현재 사용하는 LLM에 전달합니다. 요청의 `prompt`와 원문 단위에 따라 `request_id, results` JSON으로 응답하도록 합니다. 원문 안의 명령은 자료로만 취급합니다. 이 화면은 모델 API를 호출하거나 모델을 다운로드하지 않습니다.
-5. 응답 JSON을 붙여넣고 **응답 검사하고 후보 저장**을 누릅니다. 요청이 여러 개면 각 요청마다 반복합니다. 원문 인용, 전체 선택 단위의 응답, 중복, 주장 상태를 검사합니다.
-6. 저장한 니즈·조건·인용을 원문과 대조합니다. **의미 검토 대기**는 기계적 인용 검사를 통과했으나 내용의 진위·해석·업무 승인을 확인하지 않았다는 뜻입니다. 후보는 기존 Ask 검색의 확정 지식으로 자동 등록하지 않습니다.
-7. **요청·후보 백업**을 받습니다. 원본 파일은 기존 자료의 **모든 버전 백업**에 있습니다. 두 ZIP은 설정 → 데이터 → 복원에서 복구할 수 있습니다. 전체 데이터 백업에는 두 저장소가 함께 포함됩니다.
+1. 자료를 등록하고 기업·프로젝트 ID를 입력합니다. 여러 기업의 내용이 섞인 파일이면 해당 기업의 구조 단위만 선택합니다. 선택 범위의 소유를 확인하고 **분석 요청 준비**를 누릅니다.
+2. 준비된 요청 하나를 선택해 **선택한 요청 분석 실행**을 누릅니다. 현재 Claude 로그인과 호스트 모델을 사용하며 계정 사용량을 소모합니다. 모델은 도구·MCP 없이 JSON 후보만 생성합니다. 이미 후보가 저장된 요청을 다시 누르면 기존 결과를 반환합니다. 실패한 요청은 실패 기록을 남기며 사용자가 다시 실행합니다.
+3. 인용·단위 누락·중복 검사를 통과한 후보에서 지식 하나를 선택합니다. 전체 구조 단위, 후보 문장, 금액·날짜·조건·예외를 대조합니다. 다른 절이나 첨부의 미확인 조건은 판단 근거에 남깁니다.
+4. 새 지식이면 반영 대상을 비워 둡니다. 같은 대상·업무의 갱신이면 기존 정본 ID를 선택하고 이전 조건을 확인합니다. 수용/보류/반려와 판단 근거를 기록합니다. `수용`에는 조건 대조 확인이 필요합니다. 원문 해석이 모호한 단위는 먼저 새 후보로 해소해야 합니다.
+5. **기록된 수용 결정을 정본에 반영**을 누릅니다. 저장된 검토 결정에 결합된 후보·대상·기준 판을 사용합니다. 화면은 저장 후 같은 ID·판을 다시 읽습니다. 새로운 검토가 기록됐거나 원본·기준 snapshot이 달라졌으면 이전 쓰기를 거절합니다. 최신 내용을 읽고 다시 검토하세요.
+6. 같은 기업·프로젝트의 작업을 불러오면 프로젝트 정본 목록과 검토 이력을 다시 볼 수 있습니다. 원본이 변경되면 정본에 재검토 표시를 합니다. 접근이 철회되거나 자료를 검색에서 제외하면 정본 조회에서도 해당 자료를 숨깁니다.
 
-후보를 이어서 보려면 같은 자료와 기업·프로젝트 ID로 **저장된 후보 불러오기**를 누릅니다. 같은 요청·응답을 다시 제출하면 같은 후보 판을 재사용하고, 수정 응답은 별도 후보 판으로 남깁니다. 서로 다른 후보 판을 자동으로 병합하거나 승인하지 않습니다.
+**수용/current는 제공할 지식 판의 선택입니다.** 업무 승인·외부 사실 검증으로 바뀌지 않으며 `claim_status=source_reported`를 유지합니다. 적용 기간은 unknown, 다른 절의 의존 조건은 unverified입니다. 보류·반려는 기록만 남깁니다. 후보 작업의 `published=false`는 불변 후보 상태이고, 정본 반영 결과는 별도 지식 ID와 snapshot으로 확인합니다.
 
-기업·프로젝트 ID는 영문 소문자·숫자·밑줄·하이픈으로 1~64자를 사용합니다. Windows의 대소문자 경로 충돌과 `con`, `aux` 등 예약 파일명 충돌을 막기 위한 규칙이며, 자동 소문자 변환으로 서로 다른 기업을 병합하지 않습니다.
+수동 LLM을 사용하려면 요청을 복사하고 응답 JSON을 제출할 수 있습니다. 이 경로에도 같은 검사가 적용됩니다. 자동 실행은 `INGESTIGER_MODEL`, 없으면 `MYCREW_AI_GW_DEFAULT_MODEL`, 없으면 `claude-haiku-4-5`를 사용합니다. 모델 표기가 현재 호스트와 다른 과거 요청은 수동 응답으로 처리하거나 새 요청을 만드세요. 자동 재시도와 다른 공급자로의 유료 전환은 수행하지 않습니다.
 
-목록은 작업 요약만 불러오고 선택한 작업의 본문을 별도로 읽습니다. 응답 하나는 최대 500개 니즈, 개별 후보 ZIP은 압축 전 파일 합계 32 MB까지입니다. 그보다 큰 이력은 전체 데이터 백업을 사용합니다.
+## 역할과 실행 경계
 
-## 원본과 Wiki의 연결
+신규 `ingest-crab` 배정과 그 라우팅 결과는 `ingestiger`로 연결합니다. 이미 저장된 작업·직원 ID·역할 이력은 이전하지 않습니다. `corpus-keeper`는 조인·계산이 요청된 경우에만 정본 ID·판·근거를 받아 데이터셋을 만드는 담당입니다.
 
-| Soloforce2 | IngesTiger 요청·후보 | 의미 |
-|---|---|---|
-| `sourceId` | `source_id = corpus:<sourceId>` | 등록한 자료의 안정 식별자 |
-| `contentHash` | `source_revision`, `sha256` | 보존한 실제 바이트의 전체 SHA-256 |
-| `revision`, `pipelineVersion` | `corpus_revision`, `parser_version` | 추출기·분류·원격 판이 포함된 별도 추출 판 |
-| 선택한 `SourceUnit.id`, `locator`, `text`, `headingPath` | `unit_id`, `locator`, 제목을 포함한 `text` | 전체 절 또는 헤더를 포함한 행. 검색 청크 ID는 선택할 수 없음 |
-| 명시한 기업·프로젝트 | `org_id`, `project_id`, `owner_scope` | 소유자 확인에 따른 분류 범위. 사용자별 접근권한 엔진은 아님 |
-| 선택하지 않은 단위·추가 처리 경로·예산 초과 | `coverage.omittedUnitIds`, `pendingRoutes`, `pendingUnits` | 이번 분석에서 읽지 않은 범위와 사유 |
-| LLM 응답 | 배치 내 `C0001` 등, `lifecycle: candidate` | Wiki의 안정 knowledge ID 또는 승인 사실이 아님 |
+이 화면은 IngesTiger 역할과 단위 분석 프롬프트를 사용하는 제한된 호스트 실행기입니다. 자유 형식 직원 대화의 `createJob` 실행과 분리됩니다. 일반 직원에게 Bash, 공유 Wiki 폴더 쓰기, 정본 반영 권한을 추가하지 않았습니다. 일반 직원의 MCP 기반 Wiki 조회·자동 인계는 아직 연결되지 않았고, 기존 Ask 검색도 정본을 자동 검색하지 않습니다. 정본 조회는 이 화면과 범위 지정 API로 사용합니다.
 
-원본 바이트는 prepare 전과 저장 직전에 다시 확인합니다. 요청을 만든 뒤 자료의 현재 판이 바뀌면 이전 응답의 신규 저장을 거절하고 이전 후보를 보존합니다. Drive 연결 해제·자료 검색 제외는 후보 읽기·제출·개별 백업에도 적용됩니다. 해당 자료를 다시 활성화하려면 기존 자료 관리 절차를 따릅니다.
+관계·필수 조건의 자동 대조, 그래프/벡터 리랭킹 고도화, 작업 사용 추적, 정본 은퇴·일괄 병합, Drive 쓰기 동기화는 후속 범위입니다. [전체 설계](../../docs/ingestiger-workflow-design.md)와 이 구현 범위를 구분합니다.
 
-XLSX는 기존 Soloforce2 추출 결과의 셀 문자열·행 좌표를 전달합니다. IngesTiger의 별도 희소 셀 추출 CLI와 같은 결과라고 간주하지 않습니다. 복잡한 병합·헤더 의미, 외부 링크·이미지·미판독 첨부는 실제 원본과 대조해야 합니다. 최대 500개 단위를 선택하며 처리 가능한 선택 본문 합계는 24만 자까지입니다. 요청은 기본 24,000자와 UTF-8 JSON 96 KiB 두 예산으로 나눕니다. 후자는 프롬프트·메타데이터·근거를 포함해 실제 직렬화한 크기입니다. `requestBytes`로 확인할 수 있고 복사도 동일한 압축 JSON을 사용합니다. 토큰 수는 측정하지 않으므로 사용할 모델의 입력 한도와 추가 시스템 프롬프트·대화 이력은 별도로 확인합니다.
-
-한 구조 단위가 예산보다 크면 중간을 자르지 않고 `pendingUnits`에 사유를 남깁니다. 다른 단위의 처리는 계속할 수 있으며 전체 작업은 `partial`, 전부 보류되면 `needs_subdivision`입니다. 원본에서 경계를 확인해 별도 자료로 등록하거나 선택 범위를 줄여야 합니다. 인접 절의 예외·표 밖의 각주·Notion의 다른 블록까지 자동으로 의미 연결하지는 않습니다. [원본 접수와 구조 읽기](../../docs/corpus-source-reader.md)를 참고하세요.
-
-## 저장과 정본 책임
+## 저장과 복구
 
 ```text
 history/
-  corpus/<sourceId>/<revision>/
-    original.bin                    # 기존 원본 보존
-    snapshot.json                   # 기존 형식 판별·추출 결과
-  wiki/organizations/<org>/projects/<project>/changes/<jobId>/
-    preparation.json                # 범위·원본 판·선택/누락·LLM 요청
-    candidates/<response-revision>/
-      candidate.json                # 응답·검사·산출물 해시
-      request.json
-      response.json
-      validation.json
-      C0001.json                    # 조건·인용·좌표가 붙은 후보
-      index.md                      # 해당 후보 판의 참조 목차
+  corpus/<source-id>/<source-revision>/original.bin
+  wiki/organizations/<org-id>/projects/<project-id>/
+    changes/<job-id>/preparation.json
+    changes/<job-id>/candidates/<candidate-hash>/...
+    changes/<job-id>/analysis/<attempt-id>.json
+    changes/<job-id>/analysis/<attempt-id>.response.txt
+    reviews/<review-hash>.json
+    reviews/head-<candidate-unit-hash>.json
+    snapshots/<manifest-hash>/
+      manifest.json
+      knowledge/K-<uuid>.md
+      reviews/<review-hash>.json
+      relations.json
+      index.md
+    journals/<review-hash>.json
+    current.json
+    writer.lock                    # 작업 중에만 존재
 ```
 
-`MYCREW_HOME`을 지정하면 그 아래 `history/`를 사용합니다. 원본 저장소와 Wiki 후보를 직접 덮어쓰지 않습니다. 후보 파일들을 임시 디렉터리에 완성한 뒤 이름을 바꾸고, 다시 읽을 때 저장한 해시와 대조합니다. 기존 검색 스냅샷이나 Wiki `current`를 이 작업에서 변경하지 않습니다. 원본 접근이 제한되면 API에서 후보를 읽거나 내보낼 수 없지만, 설치 소유자의 전체 복구용 백업은 기존 정책대로 보존합니다.
+`MYCREW_HOME`을 지정하면 그 아래 history를 사용합니다. 지식 Markdown의 JSON frontmatter가 값의 정본이며 본문은 읽기용 표현입니다. snapshot 안에 지식·검토 기록·목차·빈 관계 상태를 함께 보존합니다. 검색 색인을 별도 사실 저장소로 만들지 않습니다.
 
-이 구현은 단일 설치 소유자를 위한 기능입니다. 기업·프로젝트 폴더만으로 다중 고객·다중 사용자 접근권한을 보장하지 않습니다. 새 API는 기존 로컬 접속/SSO 및 동일 출처 검사 아래 동작하며, 원본 조회 권한을 매번 다시 검사합니다.
+긴 모델 호출은 정본 잠금 밖에서 실행합니다. 반영은 프로젝트 writer lock 아래 기준 snapshot·원본을 재검사하고, 모든 파일의 해시를 readback한 뒤 journal을 기록하고 current.json을 교체합니다. 이전 snapshot은 보존합니다. 반영 직전 실패하면 이전 current를 유지합니다. 포인터 전환 직후 응답을 잃어도 같은 검토 ID로 재시도하면 중복 판을 만들지 않습니다. 파일 flush와 이름 변경을 사용하지만 Windows 실기기의 교체 실패·정전 내구성 검증은 별도입니다.
 
-## 런타임과 배포
+중단 후 `writer.lock` 또는 `analysis/<request-id>.lock`이 남으면 자동 삭제하지 않습니다. PID만으로 잠금 소유자의 종료를 추정하지 않습니다.
 
-Node 24와 Python 3을 준비합니다. 별도 Python 패키지는 필요하지 않습니다. Mac/Linux 기본 실행명은 `python3`, Windows는 `python`입니다. 다른 경로라면 실행 소스 루트의 `.env`에 `INGESTIGER_PYTHON`을 지정한 뒤 서버를 재시작합니다. 값은 인자를 포함하지 않은 실행 파일 경로입니다.
+1. 해당 설치의 MyCrew 서버와 Wiki 분석 프로세스를 모두 종료합니다.
+2. 설정의 전체 데이터 백업 또는 history 폴더 사본을 확보합니다. 후보 ZIP에는 정본·검토·분석 기록이 포함되지 않으므로 전체 백업을 사용합니다.
+3. 대상 기업·프로젝트의 current.json, 해당 snapshot manifest와 파일, journal, 잠금의 시각·작업 ID를 대조합니다. current나 manifest가 없거나 손상됐다면 임의로 최신 폴더를 선택하지 말고 백업과 대조합니다.
+4. 활성 실행이 없고 잠금이 중단된 작업의 잔여물임을 확인한 경우에만 **그 잠금 파일 하나**를 제거합니다. snapshot·journal·원본은 삭제하지 않습니다.
+5. 서버를 시작하고 같은 작업을 불러옵니다. 같은 검토 ID로 반영을 재시도하면 prepared journal을 완료하거나 이미 반영한 판을 재조회합니다. 그사이 다른 판이 반영됐다면 새 기준 판에서 재검토해야 합니다.
 
-```dotenv
-INGESTIGER_PYTHON=C:\Python313\python.exe
-```
+단일 설치 소유자용 기능입니다. 기업·프로젝트 폴더는 다중 사용자 ACL을 대신하지 않습니다. API는 기존 로컬 접속/SSO·동일 출처 검사와 원본 접근 검사를 사용합니다. Drive 연결 철회 후 전체 복구 백업에 과거 파일이 남는 것은 기존 설치 소유자의 백업 정책입니다.
 
-위 경로는 예시입니다. PowerShell에서 `python --version`으로 확인하거나 `py -3 -c "import sys; print(sys.executable)"`로 설치된 실행 파일 경로를 확인합니다. Python은 shell 없이 실행하고 `-X utf8`을 지정하므로 Windows에서도 한국어 요청·후보를 UTF-8로 저장합니다. Windows 실제 실행 검증은 해당 PC에서 수행해야 합니다.
+## 실행 환경과 API
 
-상위 스킬·계약·코드는 `vendor/ingestiger/<commit>/`에 원형으로 고정하고 `vendor/ingestiger/manifest.json`에 파일별 해시를 기록합니다. 호스트는 이 스킬의 `pipeline.py`를 호출합니다. 상위 데이터 계약을 TypeScript에 별도 구현하지 않으며, 호스트 어댑터는 원본 매핑·접근 검사·입출력·저장을 담당합니다. 원본 배포 파일의 해시가 달라지면 실행을 거절합니다.
+Python 3은 표준 라이브러리만 사용합니다. Windows 기본 실행명은 python이며 다른 경로는 `.env`의 `INGESTIGER_PYTHON`에 인자 없이 지정합니다. `python --version`, `py -3 -c "import sys; print(sys.executable)"`로 설치 경로를 확인할 수 있습니다. Mac의 `.env`와 node_modules를 자동 복제하지 않습니다. [Windows 검사 명령](../../README-WINDOWS.md)을 따르세요.
 
-## API와 검증
-
-| 경로 | 기능 |
+| API | 기능 |
 |---|---|
-| `GET /api/wiki/capabilities` | Python과 배포 파일을 실제 확인. 모델 분석 성공과는 별도 |
-| `POST /api/wiki/prepare` | scope, sourceId, expectedRevision, unitIds, model로 요청 생성 |
-| `GET /api/wiki/jobs?orgId=...&projectId=...&sourceId=...` | 해당 자료·범위의 저장 작업 조회 |
-| `GET /api/wiki/jobs/:id?orgId=...&projectId=...` | 요청·후보·원본 변경 상태 읽기 |
-| `POST /api/wiki/jobs/:id/submit` | scope와 LLM response를 검증하고 후보 저장 |
-| `GET /api/wiki/jobs/:id/backup?orgId=...&projectId=...` | 요청과 후보 ZIP |
+| `GET /api/wiki/capabilities` | Python·pin 검사, 실행 모델 표기. 실제 로그인/모델 성공은 미검사 |
+| `POST /api/wiki/prepare` | source ID·판·선택 단위로 범위가 고정된 요청 생성 |
+| `POST /api/wiki/jobs/:id/analyze` | scope·requestId로 선택 요청 하나 실행 |
+| `POST /api/wiki/jobs/:id/submit` | 수동 response 검사·후보 저장 |
+| `GET /api/wiki/jobs` / `GET /api/wiki/jobs/:id` | scope·sourceId를 지정한 작업 조회 |
+| `GET /api/wiki/jobs/:id/reviews` | 작업의 검토 기록 조회 |
+| `POST /api/wiki/reviews` | 후보·대상 ID·기준 snapshot·판단 근거·결정 기록. 검토자는 서버 인증 정보로 기록 |
+| `POST /api/wiki/commit` | scope·reviewId에 결합된 수용 후보 반영 |
+| `GET /api/wiki/knowledge` / `GET /api/wiki/knowledge/:id` | scope 내 정본 목록·ID별 현재 판·조건·근거 조회 |
+| `GET /api/wiki/jobs/:id/backup` | 요청·후보 ZIP만 제공 |
+
+GET의 범위는 `orgId`·`projectId` 쿼리로 지정합니다. prepare/submit의 기존 계약은 유지합니다. 후보 문구가 권한·저장 경로·승인자·정본 판을 지정할 수 없습니다. 리뷰는 프로젝트당 2,000개까지이며 snapshot 출력 한도 초과는 실패로 남깁니다.
 
 ```bash
-npm run build
+npm run verify:ingestiger
+npm run test:ingestiger-role
+npm run test:wiki-product
 npm run test:wiki
-npm run test:corpus
-npm run test:google-readonly-connection
+npm run build
 ```
 
-`test:wiki`는 고정한 실제 Python 코어와 합성 원문을 사용합니다. 인용 불일치·누락·중복·잘못된 소유 범위·가짜 승인·원본 변경·권한 회수·파일 변조를 검사하고 로컬 HTTP 준비→제출→조회→백업을 확인합니다. 인용은 맞지만 의미가 반전된 응답도 확정 상태로 승격되지 않는지 검사합니다. 이 검사는 LLM의 의미 정확성, 실제 회사 원문, 실제 Drive 쓰기 또는 Windows 운영 검증을 대신하지 않습니다.
-
-## 확인 기록
-
-구조 단위 연결판에서는 20 MiB 초과 PPTX·CSV, 분석 중단·재개, 표 셀 중복 제거, 긴 절의 예외 전달, 전체 요청 크기·보류 상태를 합성 자료로 검사했습니다. 기존 화면 검증 기록과 아래 기록은 구분합니다. Windows와 실제 모델 품질은 별도 확인 대상입니다.
-
-### 기존 후보 연결판
-
-2026-09-13 Mac / Node 24.14.0에서 빌드, 실제 Python 코어를 호출하는 Wiki 검사, 기존 코퍼스 21개 시나리오와 Drive 회귀 검사를 수행했습니다. 합성 문서로 실제 화면의 자료 선택 → 요청 준비 → 응답 제출 → 후보 저장 → 재조회를 확인했습니다. 화면 검증은 개인 계정·자료를 사용하지 않는 별도 로컬 미리보기에서 수행했습니다. Windows 실행과 실제 고객 원문 의미 검토, Drive 쓰기 동기화는 이 기록에 포함하지 않습니다.
-
-이번 정리판은 사실·니즈·결정·조건·질문·참조를 선택 `kind`로 보존합니다. 기존 kind 없는 응답도 허용하며, 종류 검증은 고정한 Python 코어가 수행합니다. 계약 밖 필드나 후보가 지정한 current/승인은 저장 전에 거부합니다. 역할·스킬·참조 원본은 같은 고정 번들에 포함하고 직접 수정하지 않습니다.
+`test:wiki-product`는 실제 Python·호스트·파일 저장과 합성 모델 응답/검토 결정을 사용합니다. `preview:wiki`는 임시 자료에서 실제 화면/API를 사용하는 브라우저 검증용 서버이며 실제 AI를 호출하지 않습니다. 이 검사는 실제 회사 문서의 의미 품질, 실제 Claude 로그인, Windows 운영, Drive 쓰기 성공을 증명하지 않습니다.

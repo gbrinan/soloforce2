@@ -19,7 +19,7 @@ const extensions: Record<string, CorpusFormat> = {
 };
 
 export class CorpusError extends Error {
-  constructor(public readonly code: string, public readonly status: 400 | 403 | 404 | 409 | 413 | 422 | 502 | 503 = 422) { super(code); }
+  constructor(public readonly code: string, public readonly status: 400 | 403 | 404 | 409 | 413 | 422 | 429 | 502 | 503 = 422) { super(code); }
 }
 export function hash(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex'); }
 

@@ -20,7 +20,7 @@ AI 에이전트 팀을 운영하는 개인 비서 시스템입니다.
 - **승인 시스템**: 민감 작업에 대해 사장님 승인을 요청하며, 부재중 모드를 지원합니다.
 - **세션 리셋 시 대화 요약 주입**: 세션이 리셋될 때 오늘 대화 요약을 자동으로 프롬프트에 주입하여 맥락을 유지합니다.
 - **자료 수집·분류·검색**: Drive·Notion·로컬 자료의 형식을 먼저 확인하고 본문·표·OCR·전사 경로로 분기합니다. 최대 512 MiB 원본의 분할 접수·분석 재개, 원본·버전 백업, 키워드·업무 분류 연결 검색, 선택적 로컬 벡터 검색을 지원합니다. 분석 한도는 형식별로 다르며 [구조 문맥과 재개 절차](docs/corpus-source-reader.md)를 확인하세요. [설정과 처리 범위](config/corpus/README.md)
-- **IngesTiger Wiki 후보**: 선택한 절·표 행을 기업·프로젝트별 분석 요청으로 만들고, LLM 응답의 인용·누락·중복을 검사해 근거가 있는 후보로 보존합니다. 후보와 확정 지식을 구분합니다. [사용법과 현재 범위](config/wiki/README.md)
+- **IngesTiger Wiki**: 선택한 절·표 행의 분석을 실행하고, 후보를 검토해 안정 ID·판·근거를 가진 정본에 반영한 뒤 같은 ID로 재조회합니다. 신규 ingest-crab 요청은 ingestiger로 연결하며, 코퍼스키퍼는 조인·집계 요청에만 사용합니다. [사용법과 현재 범위](config/wiki/README.md)
 - **IngesTiger 후속 설계**: 두 공유 세션을 반영해 작업 근거·변경 영향과 Wiki 적재 후 관계 검토·목적별 가치 판별을 설계했습니다. 아직 구현되지 않은 기능과 단계별 검증 기준은 [업무 지식 연결 설계](docs/ingestiger-workflow-design.md)를 확인하세요.
 
 ## 사전 요구사항
@@ -106,6 +106,7 @@ npm run start:b    # PORT=3459, MYCREW_HOME=.mycrew-B
 | `npm run build` | TypeScript 컴파일 + Vite 클라이언트 빌드 |
 | `npm run test:corpus` | 자료 파서·버전 보존·검색·접근 제어 및 Drive/Notion 모의 API 검증 |
 | `npm run test:corpus-reader` | 큰 원본·구조 단위·재개·변조·벡터 배치 검증 (`test:corpus`에 포함) |
+| `npm run test:wiki-product` | 분석·인간 검토·정본 갱신·ID 조회·저장 실패·권한 회수 검사 |
 | `npm run test:wiki` | IngesTiger 실제 코어·후보 인용·범위·원본 변경·접근 제어·저장 검증 |
 | `npm run test:google-readonly-connection` | 기존 Drive 읽기 전용 연결 회귀 검증 |
 | `npm test` | 전체 테스트 실행 |

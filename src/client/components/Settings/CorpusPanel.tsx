@@ -210,7 +210,7 @@ export default function CorpusPanel() {
               <Button size="xs" variant="light" component="a" href={`/api/corpus/sources/${source.sourceId}/backup`} download>모든 버전 백업</Button>
               <Button size="xs" variant="light" disabled={busy || !source.enabled || !source.retrievalAllowed || !source.chunkCount} onClick={() => void run(async () => {
                 setWikiSnapshot((await request<{ snapshot: CorpusSnapshot }>(`/api/corpus/sources/${source.sourceId}`)).snapshot);
-              })}>Wiki 후보 만들기</Button>
+              })}>Wiki 분석·정본</Button>
               {status?.embeddingConfigured && <Button size="xs" variant="light" disabled={busy || !source.enabled || !source.retrievalAllowed || !source.chunkCount} onClick={() => void run(async () => {
                 const progress = await request<{ chunks: number; total: number; complete: boolean }>(`/api/corpus/sources/${source.sourceId}/vectors`, post({}));
                 setNotice(`${source.name}: 벡터 ${progress.chunks}/${progress.total}개 ${progress.complete ? '완료' : '저장. 다시 누르면 이어서 처리합니다.'}`);

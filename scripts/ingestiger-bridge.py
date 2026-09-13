@@ -26,6 +26,11 @@ def main():
             output = Path(temporary) / 'candidate'
             core.build(body['request'], body['response'], output)
             return {'validation': json.loads((output / 'validation.json').read_text(encoding='utf-8'))}
+    if operation == 'compose':
+        spec = importlib.util.spec_from_file_location('ingestiger_knowledge', module_path.with_name('knowledge.py'))
+        knowledge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(knowledge)
+        return knowledge.compose(body['previous'], body['candidate'], body['review'])
     raise ValueError('Unknown operation')
 
 
