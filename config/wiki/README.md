@@ -4,7 +4,9 @@
 
 설정 → 데이터 → 보존한 자료 → **Wiki 후보 만들기**에서 사용합니다. 기존 Drive·Notion·로컬 자료의 원본 판을 고정하고, 선택한 절·슬라이드·표 행 등 구조 단위를 IngesTiger에 전달합니다. 검색 조각의 1,200자 경계는 분석 단위로 사용하지 않습니다. 사용 중인 LLM이 작성한 응답을 검사해 기업·프로젝트별 후보로 보존합니다.
 
-기준은 [고정한 IngesTiger 번들](../../vendor/ingestiger/manifest.json)의 로컬 commit `4c876bbecd0f727386c792976dee21479328cac1`, 버전 `1.0.0-draft.3`입니다. 이 버전의 CLI 범위인 요청 준비·응답 검사·후보 저장을 연결했습니다. 정본 승격, 안정 knowledge ID 부여, 자동 모델 호출, Drive 쓰기 동기화, 전체 에이전트의 Wiki 도구 자동 할당은 구현 범위에 포함하지 않습니다.
+기준은 [고정한 IngesTiger 번들](../../vendor/ingestiger/manifest.json)의 로컬 commit `510f23fcf1ed30a3202e16a072332e6adc8e81aa`, 버전 `1.0.0-draft.4`입니다. 이 버전의 CLI 범위인 요청 준비·응답 검사·후보 저장을 연결했습니다. 정본 승격, 안정 knowledge ID 부여, 자동 모델 호출, Drive 쓰기 동기화, 전체 에이전트의 Wiki 도구 자동 할당은 구현 범위에 포함하지 않습니다.
+
+[인제스트타이거 직원 등록](../agents/ingestiger/README.md)도 제공합니다. 직원의 전체 역할과 이 화면의 단위 분석 프롬프트는 각 실행 단계에서 사용합니다. 적용 여부는 [역할 반영 확인](../../docs/ingestiger-role-verification.md)에서 검사합니다.
 
 ## 사용 순서
 

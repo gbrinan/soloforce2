@@ -1,5 +1,7 @@
 # MyCrew Agent Team
 
+[IngesTiger 역할 반영 확인](docs/ingestiger-role-verification.md): 새 직원 등록, 역할·스킬 연결, Windows Markdown 검사 절차.
+
 > **문서 역할**: 프로젝트 개요·개발자용 안내 (정본 허브). 최종 사용자는 [README-USER.md](README-USER.md), Windows 설치는 [README-WINDOWS.md](README-WINDOWS.md), 소스 zip 배포 설치는 [README-DISTRIBUTION.md](README-DISTRIBUTION.md).
 
 AI 에이전트 팀을 운영하는 개인 비서 시스템입니다.

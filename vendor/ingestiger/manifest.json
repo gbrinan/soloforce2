@@ -1,31 +1,31 @@
 {
   "repository": "https://github.com/gbrinan/ingestiger",
-  "commit": "4c876bbecd0f727386c792976dee21479328cac1",
-  "version": "1.0.0-draft.3",
+  "commit": "510f23fcf1ed30a3202e16a072332e6adc8e81aa",
+  "version": "1.0.0-draft.4",
   "files": [
     {
       "path": ".claude-plugin/plugin.json",
-      "sha256": "a275c7293fefe4ff4483d7ddf798c3a4e109fdfd2d55baf4ef617e6c86655cf7"
+      "sha256": "fa083f1ef78cd6fb71083c0f5f5d3e42147ae00a63d5c2deaba1db92f8ef0805"
     },
     {
       "path": "agent/meta.json",
-      "sha256": "5c4f3a0cc2343f763f9f03dd84d6442cdc2a004b49c322b14238187dbf5ef4fc"
+      "sha256": "418f85851e596b716e5a348a5f89a3992fb0e7d8a7c6f5a17b2ffeea8072fc80"
     },
     {
       "path": "agent/role-directive.md",
-      "sha256": "1e8829926b0242694a478c3a60a99ffea16878b38718c61275c1b7864637f4a1"
+      "sha256": "303400b6dc3ba06a7b2a30fa422a77c622e149c613b021a3dacd2c14128f8db7"
     },
     {
       "path": "skills/ingestiger/SKILL.md",
-      "sha256": "f4b2579068c9a30c5bb318ae8868e924cfe2f5e37afc15474bb0cdc5262235e4"
+      "sha256": "802c0d2c41d588a103260b116b7cc20c885926cea882c54a16ceb2a795ee2e37"
     },
     {
       "path": "skills/ingestiger/references/adapters.md",
-      "sha256": "3ff4a9dc1258e178d8169476e794ee9d1fdd56f0554ccd871d4e14c9b6063fe3"
+      "sha256": "88c080b047d95394cbfa73ff1dd43ef2ee8ade07197c3e2085724500da080a99"
     },
     {
       "path": "skills/ingestiger/references/contracts.md",
-      "sha256": "58a2f9fbee8e26d6271d04d44a34b3c2674364d67bdd08d046eed3a7efd8f5c4"
+      "sha256": "f7ff850e7f9e2e4fc7c26e0889b86c202751d030e12e1700a433e0967cc5718d"
     },
     {
       "path": "skills/ingestiger/references/golden-samples.md",
@@ -37,11 +37,11 @@
     },
     {
       "path": "skills/ingestiger/references/modes.md",
-      "sha256": "0ee531372785ca79d2f3707c2524f444c96ed75987fbbebe5d570c1b00eb4b38"
+      "sha256": "280aeedb22c1b4208586ed6f295e3ebcc7cecfdde37a50b9fdf09728878d7e07"
     },
     {
       "path": "skills/ingestiger/references/runbook.md",
-      "sha256": "03579f1b0c62d717656739991f8af3c1fc49df9b531f85e758faf4335598fe72"
+      "sha256": "a3e11bacd5944fba9908f97785e58acddf36f4f3865f6a119b90b5ae8d1acd85"
     },
     {
       "path": "skills/ingestiger/references/source-quality.md",
@@ -49,7 +49,7 @@
     },
     {
       "path": "skills/ingestiger/references/storage.md",
-      "sha256": "1c4f8d34c01e46ee1e75a1c58e9fc68d512ce5b8f5859f9384a6e2dfad8ef7b0"
+      "sha256": "c23e446307087d21fecd4cb7c746fbb03eb26f517376085708c4858a4169cbd4"
     },
     {
       "path": "skills/ingestiger/references/structure.md",
@@ -69,7 +69,7 @@
     },
     {
       "path": "skills/ingestiger/scripts/pipeline.py",
-      "sha256": "66e416dc278fb557207feb5cab6787b435dc65c70369207039e10429f2f63586"
+      "sha256": "4ef018be47244fb07ed79d01e9488a11282e825c4b39e4cbdb28d97b00f0434c"
     }
   ]
 }

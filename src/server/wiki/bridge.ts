@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PROJECT_SELF_DIR } from '../../config.js';
 import { CorpusError, hash } from '../corpus/extract.js';
 
-export const UPSTREAM_COMMIT = '4c876bbecd0f727386c792976dee21479328cac1';
+export const UPSTREAM_COMMIT = '510f23fcf1ed30a3202e16a072332e6adc8e81aa';
 export function verifyWikiBundle(): void {
   const root = join(PROJECT_SELF_DIR, 'vendor', 'ingestiger');
   const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));

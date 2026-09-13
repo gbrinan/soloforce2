@@ -1,6 +1,7 @@
 import { readFileSync, statSync, existsSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { HISTORY_DIR, PROJECT_SELF_DIR } from "./config.js";
+import { syncRoleDirective } from "./role-directive.js";
 import type { AgentConfig } from "./types.js";
 import { getUserTitle } from "./server/user-title.js";
 import { resolveDeprecatedModel, recordSuccession } from "./server/model-catalog.js";
@@ -188,36 +189,18 @@ export function ensureAgentDirs(agent: WorkerAgentDef, all?: WorkerAgentDef[]): 
   const tmplPath = join(PROJECT_SELF_DIR, "config", "role-directives", `${agent.id}.md`);
   const seedPath = existsSync(newTmplPath) ? newTmplPath : existsSync(tmplPath) ? tmplPath : null;
 
-  if (existsSync(rdPath)) {
-    // 씨앗이 갱신되면 wiki 사본도 따라간다. 이 재동기화가 없으면 config/agents/<id>/role-directive.md
-    // 수정이 "이미 만들어진" 직원에게는 영원히 전달되지 않는다(loadIdentity는 wiki 사본만 읽는다).
-    // 손으로 고친 사본(씨앗보다 최신)은 건드리지 않고, 씨앗이 더 최신일 때만 .bak 백업 후 교체한다.
-    if (seedPath) {
-      try {
-        // mtime 먼저 비교 — 레지스트리 갱신마다 전 직원 파일을 읽지 않기 위한 값싼 게이트.
-        if (statSync(seedPath).mtimeMs > statSync(rdPath).mtimeMs) {
-          const expected = applyPlaceholders(readFileSync(seedPath, "utf-8"), agent, all ?? [agent]);
-          const current = readFileSync(rdPath, "utf-8");
-          if (current !== expected) {
-            writeFileSync(`${rdPath}.bak`, current, "utf-8");
-            writeFileSync(rdPath, expected, "utf-8");
-            console.log(`[Registry] ${agent.id} role-directive 재동기화 (이전본 → role-directive.md.bak)`);
-          }
-        }
-      } catch (e) {
-        console.error(`[Registry] ${agent.id} role-directive 재동기화 실패:`, e);
-      }
+  if (seedPath) {
+    const existed = existsSync(rdPath);
+    try {
+      const state = syncRoleDirective(seedPath, rdPath, raw => applyPlaceholders(raw, agent, all ?? [agent]));
+      if (state === 'updated') console.log(`[Registry] ${agent.id} role-directive 재동기화 (이전본 → role-directive.md.bak)`);
+    } catch (error) {
+      if (!existed) throw error;
+      console.error(`[Registry] ${agent.id} role-directive 재동기화 실패:`, error);
     }
-  } else {
-    if (seedPath) {
-      const raw = readFileSync(seedPath, "utf-8");
-      writeFileSync(rdPath, applyPlaceholders(raw, agent, all ?? [agent]));
-    } else {
-      writeFileSync(
-        rdPath,
-        `# ${agent.name}(${agent.role ?? "팀장"}) 역할 지시서\n\n> 이 문서는 사용자/마이크루가 관리합니다. 본인이 수정하지 마세요.\n\n## 역할\n${agent.role ?? "팀장"}. 마이크루의 지시를 받아 ${agent.team ?? ""} 업무를 수행합니다.\n\n## 업무 원칙\n- 지시받은 작업을 반드시 완료합니다.\n- 결과를 간결하게 보고합니다.\n`,
-      );
-    }
+  } else if (!existsSync(rdPath)) {
+    writeFileSync(rdPath,
+      `# ${agent.name}(${agent.role ?? "팀장"}) 역할 지시서\n\n> 이 문서는 사용자/마이크루가 관리합니다. 본인이 수정하지 마세요.\n\n## 역할\n${agent.role ?? "팀장"}. 마이크루의 지시를 받아 ${agent.team ?? ""} 업무를 수행합니다.\n\n## 업무 원칙\n- 지시받은 작업을 반드시 완료합니다.\n- 결과를 간결하게 보고합니다.\n`);
   }
 }
 

@@ -105,11 +105,15 @@ WSL 설치는 Ubuntu 터미널의 실제 소스 폴더에서 Git 업데이트, `
 
 ### 큰 원본·구조 문맥 기능 확인
 
-이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `4c876bbecd0f727386c792976dee21479328cac1`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
+이 변경의 로컬 개발 브랜치는 `codex/ingestiger-wiki-adapter`, 고정 IngesTiger는 `510f23fcf1ed30a3202e16a072332e6adc8e81aa`입니다. 원격에 반영되기 전에는 위 `git pull origin main`만으로 이 기능이 설치되지 않습니다. 받은 코드의 `vendor/ingestiger/manifest.json`과 `test:corpus-reader` 스크립트 존재 여부를 확인하세요. [처리 한도와 재개 방법](docs/corpus-source-reader.md)이 운영 기준입니다.
 
 `test:corpus`는 새 큰 원본 검사도 포함합니다. 합성 파일을 로컬 파일 탭에서 보관하고 **분석 시작 → 잠시 멈춤 → 분석 이어가기**를 확인합니다. 1,200자 뒤에 예외 문장이 있는 절을 검색해 **절·표의 문맥 함께 읽기**에 예외가 포함되는지 확인하세요. `corpus-1` 기존 자료는 보존 원본을 재등록해야 새 Wiki 준비와 Ask 문맥 확장을 사용할 수 있습니다.
 
 Windows에서는 프로세스 재시작 후 재개와 원본 다운로드 해시도 확인합니다. Mac에서 통과한 검사를 Windows에서 통과했다고 간주하지 않습니다. 이 기능에 새 클라우드 계정이나 유료 서비스 설정은 필요하지 않습니다.
+
+### IngesTiger 역할 확인
+
+역할·직원 등록·실행 사본의 확인은 [역할 반영 검사](docs/ingestiger-role-verification.md)의 명령과 합성 조회로 진행합니다. `verify:ingestiger`는 설치 파일을, `--runtime --report <새 md 경로>`는 실제 실행 역할을 검사하고 Markdown 결과를 만듭니다. 새 Wiki 작업은 `ingestiger` 직원에 위임합니다. 기존 ingest-crab의 기록은 자동 이전하지 않습니다.
 
 ### Windows Codex에 요청하기
 

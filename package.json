@@ -31,7 +31,10 @@
     "test:wiki": "node --import tsx scripts/wiki-test.ts",
     "test:corpus": "node --import tsx scripts/corpus-test.ts && node --import tsx scripts/corpus-provider-test.ts && node --import tsx scripts/corpus-server-test.ts && npm run test:corpus-reader",
     "test:meeting-memory": "node --import tsx scripts/meeting-memory-test.ts",
-    "test:corpus-reader": "node --import tsx scripts/corpus-structure-test.ts && node --import tsx scripts/corpus-intake-test.ts"
+    "test:corpus-reader": "node --import tsx scripts/corpus-structure-test.ts && node --import tsx scripts/corpus-intake-test.ts",
+    "sync:ingestiger": "node --import tsx scripts/ingestiger-sync.ts",
+    "verify:ingestiger": "node --import tsx scripts/ingestiger-check.ts",
+    "test:ingestiger-role": "node --import tsx scripts/ingestiger-role-test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

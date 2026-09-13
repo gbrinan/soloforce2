@@ -1,3 +1,4 @@
+import { loadWorkerIdentity } from "./worker-identity.js";
 import { randomUUID, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, appendFileSync, statSync, realpathSync } from "node:fs";
@@ -1551,19 +1552,6 @@ function buildTagReminder(agentId: string): string {
 
 // --- 세션 시작용: 정체성 + 조직도 ---
 
-function loadIdentity(agentId: string): string {
-  const dir = join(HISTORY_DIR, "agents", agentId, "wiki");
-  const parts: string[] = [];
-  const rdPath = join(dir, "role-directive.md");
-  if (existsSync(rdPath)) parts.push(`[역할 지시서]\n${readFileSync(rdPath, "utf-8")}\n[역할 지시서 끝]`);
-  const spPath = join(dir, "self-profile.md");
-  if (existsSync(spPath)) {
-    parts.push(`[자기 프로필]\n${readFileSync(spPath, "utf-8")}\n[자기 프로필 끝]`);
-  } else {
-    parts.push(`[안내] self-profile.md가 없습니다. 작업 경험이 쌓이면 wiki/self-profile.md에 강점, 약점, 교훈을 기록하세요.`);
-  }
-  return parts.join("\n\n");
-}
 
 // buildOrgChart 캐시: full=true 경로는 직원 N명의 role-directive.md를 매번 readFileSync.
 // (selfId, mtimesHash) 키로 결과 캐시 — statSync만 매번 돌리고 변동 없으면 readFileSync 생략.
@@ -1759,7 +1747,7 @@ function buildWorkerPrompt(
 
   // 새 세션: 정체성 + 조직도(요약) + 위키 인덱스 + 3일 요약
   markSessionStart(agentDef.id);
-  const identity = loadIdentity(agentDef.id);
+  const identity = loadWorkerIdentity(agentDef.id, HISTORY_DIR);
   // [토큰 감사 #1] 동료 15명의 role-directive 전문(합계 ~43KB ≈ 12~16K토큰)을 매 fresh 세션마다
   // 주입하던 O(N²) 구조 제거 — 지니와 동일하게 요약 로스터만 주고, 특정 동료의 상세가 필요하면
   // SafeRead로 온디맨드 조회하게 안내한다. QA 재검(최대 3회)·리셋 폭풍과 곱해지던 최대 낭비원.
