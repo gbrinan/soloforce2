@@ -28,6 +28,32 @@ export function isApiOverloadError(text: string): boolean {
   return /overloaded_error|rate_limit_error|\bOverloaded\b|HTTP\s+(?:529|429)\b|"status"\s*:\s*(?:529|429)\b|status\s+code\s+(?:529|429)\b/i.test(text);
 }
 
+export function isOAuthExpiredError(text: string): boolean {
+  if (!text) return false;
+  const plain = text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
+  return /(?:failed to authenticate[\s\S]*?)?(?:API Error:\s*)?401[\s\S]*OAuth access token has expired/i.test(plain);
+}
+
+export async function retryOnceOnOAuthExpiration<T>(
+  run: () => Promise<T>,
+  reset: () => void | Promise<void>,
+  textOf: (value: T) => string = (value) => String(value),
+): Promise<T> {
+  try {
+    const value = await run();
+    if (!isOAuthExpiredError(textOf(value))) return value;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isOAuthExpiredError(message)) throw error;
+  }
+  await reset();
+  const retried = await run();
+  if (isOAuthExpiredError(textOf(retried))) {
+    throw new Error("Claude OAuth authentication still expired after session reset");
+  }
+  return retried;
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((res) => setTimeout(res, ms));
 }
