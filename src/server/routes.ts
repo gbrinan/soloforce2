@@ -877,6 +877,7 @@ export function registerRoutes(app: Hono): void {
       body.maxTurns,
       todo.id,
       body.effort,
+      body.skipOutput !== false,
     );
     setJobTaskMeta(job.id, task.id, task.instruction);
     // ACK 페이로드
@@ -918,6 +919,7 @@ export function registerRoutes(app: Hono): void {
       leaseSec?: number;
       maxTurns?: number;
       selfRestart?: boolean;
+      skipOutput?: boolean;
       taskId?: string;
       taskTitle?: string;
       effort?: string;

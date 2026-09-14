@@ -834,6 +834,7 @@ export function createJob(
   maxTurns?: number,
   todoId?: string,
   effort?: string,
+  skipOutput?: boolean,
 ): Job {
   agent = agent ? resolveNewWorkerId(agent) : undefined;
   stageAgents = stageAgents?.map(resolveNewWorkerId);
@@ -865,6 +866,7 @@ export function createJob(
     genieTurnId: getGenieTurnId() || undefined, // 마이크루 턴 중 생성 시에만 값 있음
     selfRestart,
     skipPlanGate,
+    skipOutput,
     ...(leaseSec !== undefined && leaseSec > 0 ? { leaseSec } : {}),
     ...(maxTurns !== undefined && maxTurns > 0 ? { maxTurns } : {}),
     // 모르는 값은 싣지 않는다 — 저장해 두면 나중에 "지정했는데 왜 안 먹지"로 오진된다.
@@ -2593,7 +2595,7 @@ async function processJob(jobId: string): Promise<void> {
         const finalResult = job.stageResults!.join("\n\n---\n\n");
         
         // QA 보고서 구조개선 ①: exit + stderr + stdout 종합 분류
-        const classified = classifyExit(finalResult, job.logs, true); // agentSuccess=true (multi-stage 성공)
+        const classified = classifyExit(finalResult, job.logs, true, undefined, job.skipOutput === true); // agentSuccess=true (multi-stage 성공)
         job.status = classified.status;
         
         // Stage 1: 워커 결과 품질 검사 (delegation_only 감지)
@@ -2705,7 +2707,7 @@ async function processJob(jobId: string): Promise<void> {
 
           {
             // QA 보고서 구조개선 ①: exit + stderr + stdout 종합 분류
-            const classified = classifyExit(taskResult, job.logs, true); // agentSuccess=true (try 안 성공)
+            const classified = classifyExit(taskResult, job.logs, true, undefined, job.skipOutput === true); // agentSuccess=true (try 안 성공)
             job.status = classified.status;
             
             // Stage 1: 워커 결과 품질 검사 (delegation_only 감지)

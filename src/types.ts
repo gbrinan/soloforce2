@@ -108,6 +108,7 @@ export interface Job {
   leaseUntilMs?: number;
   selfRestart?: boolean;
   skipPlanGate?: boolean;
+  skipOutput?: boolean;
   leaseSec?: number;
   maxTurns?: number;
   outputFiles?: string[];

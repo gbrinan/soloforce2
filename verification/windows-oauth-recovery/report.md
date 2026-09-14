@@ -23,6 +23,21 @@
 - 사용량: 15 tokens, USD 0.190082
 - 잡 상태는 `outputs_missing`이다. 인증이나 모델 호출 실패가 아니라 검증 프롬프트가 직원 보고 형식을 생략한 결과이며, 로그에는 exit 0과 실제 결과가 남았다.
 
+### 후속 정정
+
+위 `outputs_missing` 상태와 실패 알림 자체가 별도 결함이었다. API의 `skipOutput`은 프롬프트 문구에만 반영되고 Job에 저장되지 않아, 분류기가 모든 성공 응답에 구조화 보고서를 요구했다. `skipOutput=true`를 Job에 보존하고, 치명 오류 검사를 통과한 텍스트 전용 작업은 일반 텍스트 응답만으로 완료 처리하도록 수정했다. 따라서 위 Job은 인증과 모델 실행 관점에서 성공이며, 새 버전에서는 같은 응답이 `completed`로 분류된다.
+
+현재 소스를 별도 Windows 격리 서버 `127.0.0.1:3487`에서 실행해 같은 조건을 재검증했다.
+
+- 모델 ID: `claude-sonnet-5`
+- 직원: `corpus-keeper`
+- job ID: `83820107-8abb-41ea-9e23-0a74a7b5026f`
+- task ID: `22cbcdc9-7b8f-4756-9ecb-876a64c35e8d`
+- 결과: `AUTH_RECOVERED`
+- 최종 상태: `completed`
+- 사용량: 15 tokens, USD 0.334126
+- 외부 조회·파일 변경·위임: 없음
+
 ## 코드 복구
 
 - ANSI가 포함된 PTY 출력에서도 `401 OAuth access token has expired`를 감지한다.
