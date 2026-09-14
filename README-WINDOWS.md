@@ -532,3 +532,11 @@ if ($LASTEXITCODE -ne 0) { throw '빌드 실패' }
 ### GitHub 소스 배포판 적용
 
 Git 설치는 기존 실행 폴더의 변경 상태를 확인하고 `git pull --ff-only origin main`으로 갱신합니다. ZIP 설치는 GitHub Releases의 `soloforce2-ingestiger-source.zip`을 새 폴더에 풀고 기존 `.env`와 history를 별도로 보존·연결합니다. 두 설치 형태를 섞지 마세요. 패키지에는 Mac node_modules나 계정 정보가 없습니다. 설치 후 `npm.cmd ci` → `npm.cmd run build` → 위 Wiki 검사 → 서버 재시작 순서로 진행합니다.
+
+## 2026-09-14 네이티브 Windows 협업 검사
+
+Node 24.14.0, Python 3.14.6에서 설치·빌드·Wiki 검사와 실제 stdio MCP 호출을 확인했습니다. 실제 모델 협업은 Windows Claude OAuth 세션 만료로 완료하지 못했습니다. 서버 health, capabilities, ConPTY 실행 파일 기동을 모델 작업 완료로 간주하지 않습니다. [검증 결과와 재개 절차](verification/windows-20260914/report.md)를 확인하세요.
+
+`python`이 Windows 앱 실행 별칭이면 `py -3 -c "import sys; print(sys.executable)"`로 확인한 실행 파일을 `INGESTIGER_PYTHON`에 지정합니다. `CLAUDE_PATH`도 Node가 셸 없이 실행할 수 있는 Windows `claude.exe`의 실제 경로를 사용하세요. npm의 `claude.cmd`와 확장자 없는 셸 래퍼를 네이티브 실행 파일로 간주하지 않습니다. 기존 `.env`는 덮어쓰지 않습니다.
+
+추가 합성 표면 검사는 `node --import tsx scripts/wiki-windows-surface-test.ts`입니다. 실제 TCP 호스트와 별도 MCP 프로세스를 사용하지만 후보·검토·집계는 테스트 코드가 만듭니다. 실제 직원·모델 위임 검사가 아니며, 매 실행마다 별도 한글·공백 경로를 만들어 결과와 변경 감지 증거를 보존합니다.

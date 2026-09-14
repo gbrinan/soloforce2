@@ -26,3 +26,7 @@
 `npm run test:wiki-collaboration`은 임시 원본에서 정본을 만든 뒤 MCP 실제 메시지 전송과 호스트 라우트 연결, 검색 밖 필수 조건, 권한 거절, 인계 중복 억제, 인용 위치·해시 재조회, 판·원본 변경을 검사한다. 위임 생성은 테스트 콜백을 사용하며 실제 직원을 실행하지 않는다.
 
 이번 추가 기능의 실제 다중 모델 협업과 Windows PTY 실행은 미검증이다. 이전 실제 Claude 분석 호출 검증과 구분한다. Ask의 기존 검색 API, 관계 추론, 벡터 리랭킹, 의미상 사용 판정, 자동 수정·알림은 이번 변경에 포함하지 않는다.
+
+## Windows 검증 범위 (2026-09-14)
+
+[Windows 실행 보고서](../verification/windows-20260914/report.md)에 네이티브 설치·빌드, TCP/stdio MCP, 권한 거절, 판·원본·결과물 변경 감지 증거를 기록했습니다. `scripts/wiki-windows-surface-test.ts`는 실제 MCP 프로세스 재기동까지 검사하지만 모델과 실제 위임 작업은 실행하지 않습니다. Windows Claude OAuth 만료로 실제 다중 모델 협업과 직원 PTY의 작업 완료는 미완료입니다. stdio MCP 재기동과 ConPTY 실행 파일 기동을 직원 PTY의 도구 호출 성공으로 해석하지 마세요.
