@@ -30,3 +30,9 @@
 ## Windows 검증 범위 (2026-09-14)
 
 [Windows 실행 보고서](../verification/windows-20260914/report.md)에 네이티브 설치·빌드, TCP/stdio MCP, 권한 거절, 판·원본·결과물 변경 감지 증거를 기록했습니다. `scripts/wiki-windows-surface-test.ts`는 실제 MCP 프로세스 재기동까지 검사하지만 모델과 실제 위임 작업은 실행하지 않습니다. Windows Claude OAuth 만료로 실제 다중 모델 협업과 직원 PTY의 작업 완료는 미완료입니다. stdio MCP 재기동과 ConPTY 실행 파일 기동을 직원 PTY의 도구 호출 성공으로 해석하지 마세요.
+
+### 실제 작업 ID와 인증 재시도
+
+일반 작업·계획·세션 재시도 경로는 큐에서 발급한 실제 job UUID를 adapter에 전달합니다. Wiki 사용 기록의 jobId를 `/api/jobs/:id`와 대조해야 하며, 직원별 고정 문자열을 작업 완료의 증거로 사용하지 않습니다. `node --import tsx scripts/wiki-job-identity-test.ts`는 실제 큐에서 adapter 경계까지 이 연결을 검사하는 합성 회귀 검사입니다.
+
+[Windows 인증 복구 후 재시도 보고서](../verification/windows-live-retry/report.md)는 실제 Claude 응답을 확보했으나 후보 스키마·출력 문제로 정본 반영까지 완료하지 못한 결과를 기록합니다. 앞선 OAuth 실패는 과거 실행 결과이며, 현재 장애와 구분합니다. 실제 직원 인계 및 다중 모델 완료는 여전히 검증되지 않았습니다.

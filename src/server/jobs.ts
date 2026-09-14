@@ -1873,7 +1873,7 @@ async function runPlanApprovalGate(
     }
     console.log(`[Plan] 계획 수립 시도 ${attempt}/${MAX_PLAN_ATTEMPTS}`);
 
-    let planResult = await adapter.execute(planConfig, `${agentId}-plan`, planPrompt, {
+    let planResult = await adapter.execute(planConfig, jobId ?? `${agentId}-plan`, planPrompt, {
       resumeSessionId: liveSession(sessionId, cwd),
       cwd,
       onProgress,
@@ -1895,7 +1895,7 @@ async function runPlanApprovalGate(
       clearPmSession(agentId);
       sessionId = undefined;
       planPrompt = buildWorkerPrompt(agentDef, undefined, `${PLAN_PREFIX}\n\n${request}`, projectName, jobId);
-      planResult = await adapter.execute(planConfig, `${agentId}-plan`, planPrompt, {
+      planResult = await adapter.execute(planConfig, jobId ?? `${agentId}-plan`, planPrompt, {
         cwd,
         onProgress,
         onSpawn: makeChildPidRegistrar(jobId),
@@ -2009,7 +2009,7 @@ async function finalizeWorkerResult(
       }
 
       const bashFeedback = `[Bash 실행 결과]\n${bashResults.join("\n\n")}\n[결과 끝]\n\n위 결과를 확인하고 작업을 계속하세요.`;
-      result = await adapter.execute(config, `${agentId}-job`, bashFeedback, {
+      result = await adapter.execute(config, jobId ?? `${agentId}-job`, bashFeedback, {
         resumeSessionId: liveSession(loadPmSession(agentId), cwd),
         cwd,
         onProgress,
@@ -2190,7 +2190,7 @@ ${request}
 
 위 요청을 지금 실행하세요. 모든 도구 사용 가능합니다.`, projectName, jobId);
     if (!execResumeSid) console.warn(`[${agentId}] 계획 세션 유실 → 원 요청 폴백으로 실행`);
-    const executeResult = await adapter.execute(config, `${agentId}-job`, executePrompt, {
+    const executeResult = await adapter.execute(config, jobId ?? `${agentId}-job`, executePrompt, {
       resumeSessionId: execResumeSid,
       cwd,
       onProgress,
@@ -2234,7 +2234,7 @@ ${request}
   const prompt = buildWorkerPrompt(agentDef, sessionId, request, projectName, jobId);
   if (!sessionId) console.log(`[${agentId}] 새 세션으로 시작 (위키 로드됨)`);
 
-  let result = await adapter.execute(config, `${agentId}-job`, prompt, {
+  let result = await adapter.execute(config, jobId ?? `${agentId}-job`, prompt, {
     resumeSessionId: liveSession(sessionId, cwd),
     cwd,
     onProgress,
@@ -2255,7 +2255,7 @@ ${request}
     clearPmSession(agentId);
     sessionId = undefined;
     const retryPrompt = buildWorkerPrompt(agentDef, undefined, request, projectName, jobId);
-    result = await adapter.execute(config, `${agentId}-job`, retryPrompt, {
+    result = await adapter.execute(config, jobId ?? `${agentId}-job`, retryPrompt, {
       cwd,
       onProgress,
       onSpawn: makeChildPidRegistrar(jobId),
