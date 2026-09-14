@@ -5,9 +5,11 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 
 if (!process.argv.includes('--confirm-real-call')) throw new Error('Explicit real-call opt-in required');
-const evidence = resolve('verification/windows-live-retry');
+const evidence = resolve('verification/windows-schema-live');
 mkdirSync(evidence, { recursive: true });
-const root = mkdtempSync(join(evidence, 'runtime 한글 '));
+const replay = process.argv.includes('--replay-captured-response');
+const root = replay ? z.object({ root: z.string() }).parse(JSON.parse(readFileSync(join(evidence, 'run.json'), 'utf8'))).root : mkdtempSync(join(evidence, 'runtime 한글 '));
+process.env.INGESTIGER_MODEL = 'claude-sonnet-5';
 process.env.MYCREW_HOME = root;
 process.env.WORKSPACE_ROOT = root;
 process.env.CLAUDE_PATH = 'C:/Users/user/.local/bin/claude.exe';
@@ -32,19 +34,19 @@ assert.ok(units?.length);
 const job = await wiki.prepare({ scope, sourceId: source.sourceId, expectedRevision: source.revision, unitIds: units.map(unit => unit.id), model: WIKI_MODEL });
 const manifest = { root, scope, sourceId: source.sourceId, jobId: job.id, requestedModel: WIKI_MODEL, realModel: true };
 writeFileSync(join(evidence, 'run.json'), JSON.stringify(manifest, null, 2));
-const envelope = z.object({ result: z.string(), is_error: z.boolean().optional(), session_id: z.string(), total_cost_usd: z.number(), duration_ms: z.number(), modelUsage: z.record(z.string(), z.unknown()), usage: z.object({ input_tokens: z.number(), output_tokens: z.number(), cache_read_input_tokens: z.number().optional(), cache_creation_input_tokens: z.number().optional() }) });
+const envelope = z.object({ result: z.string().default(''), structured_output: z.unknown().optional(), is_error: z.boolean().optional(), session_id: z.string(), total_cost_usd: z.number(), duration_ms: z.number(), modelUsage: z.record(z.string(), z.unknown()), usage: z.object({ input_tokens: z.number(), output_tokens: z.number(), cache_read_input_tokens: z.number().optional(), cache_creation_input_tokens: z.number().optional() }) });
 const execution = new WikiExecution(wiki, async options => {
-  const raw = await new Promise<string>((done, fail) => {
+  const raw = replay ? readFileSync(join(evidence, 'cli-output.jsonl'), 'utf8') : await new Promise<string>((done, fail) => {
     const child = spawn(process.env.CLAUDE_PATH ?? '', ['-p', '--output-format', 'stream-json', '--verbose', ...buildBaseArgs(options)], { env: safeChildEnvForCli(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, cwd: root });
-    let output = '';
+    let output = ''; let stderr = '';
     const timer = setTimeout(() => { child.kill(); fail(new Error('real analysis timeout')); }, 120000);
     child.stdout.on('data', data => { output += data.toString(); });
-    child.stderr.resume();
+    child.stderr.on('data', data => { stderr += data.toString(); });
     child.on('error', fail);
-    child.on('close', code => { clearTimeout(timer); code === 0 ? done(output) : fail(new Error(`real CLI exit ${code}`)); });
+    child.on('close', code => { clearTimeout(timer); writeFileSync(join(evidence, 'cli-output.jsonl'), output); writeFileSync(join(evidence, 'cli-stderr.log'), stderr); code === 0 ? done(output) : fail(new Error(`real CLI exit ${code}`)); });
     child.stdin.end(options.prompt + String.fromCharCode(10) + '출력 요구: 위 units의 한국어 원문만 분석하세요. request_id/results JSON 객체 외에 코드블록이나 설명을 출력하지 마세요. title/statement/details는 한국어로 쓰세요. 담당 부서 미정은 unknown으로 분류하고 결정기한·승인절차·준비완료 여부를 추론하지 마세요. 2026-10-01 적용일, 시스템은 주문 초안만 작성, 사람이 최종 주문 실행, 자동 주문 금지를 각각 적용되는 후보에 보존하세요. 모호하지 않은 원문은 analyzed이며 담당 부서 미정은 unknown 후보입니다.');
   });
-  const events = raw.trim().split(String.fromCharCode(10)).map(line => z.object({ type: z.string(), message: z.object({ model: z.string() }).passthrough().optional() }).passthrough().parse(JSON.parse(line)));
+  const events = raw.trim().split(String.fromCharCode(10)).map(line => z.object({ type: z.string(), message: z.object({ model: z.string().optional() }).passthrough().optional() }).passthrough().parse(JSON.parse(line)));
   const response = envelope.parse(events.find(event => event.type === 'result'));
   const actualModels = [...new Set(events.filter(event => event.type === 'assistant').map(event => event.message?.model).filter(Boolean))];
   assert.equal(actualModels.length, 1);
@@ -52,7 +54,8 @@ const execution = new WikiExecution(wiki, async options => {
   writeFileSync(join(evidence, 'ingestiger-response.json'), JSON.stringify(response, null, 2));
   assert.notEqual(response.is_error, true);
   const model = z.string().parse(actualModels[0]);
-  return { text: response.result, model, costUsd: response.total_cost_usd, durationMs: response.duration_ms, usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens } };
+  const { gatewayResponseText } = await import('../src/server/ai-gateway-response.js');
+  return { text: gatewayResponseText(response, Boolean(options.jsonSchema)), model, costUsd: response.total_cost_usd, durationMs: response.duration_ms, usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens } };
 });
 try {
   const analyzed = await execution.analyze(job.id, { scope, requestId: job.payload.requests[0].request_id });

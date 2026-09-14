@@ -36,3 +36,5 @@
 일반 작업·계획·세션 재시도 경로는 큐에서 발급한 실제 job UUID를 adapter에 전달합니다. Wiki 사용 기록의 jobId를 `/api/jobs/:id`와 대조해야 하며, 직원별 고정 문자열을 작업 완료의 증거로 사용하지 않습니다. `node --import tsx scripts/wiki-job-identity-test.ts`는 실제 큐에서 adapter 경계까지 이 연결을 검사하는 합성 회귀 검사입니다.
 
 [Windows 인증 복구 후 재시도 보고서](../verification/windows-live-retry/report.md)는 실제 Claude 응답을 확보했으나 후보 스키마·출력 문제로 정본 반영까지 완료하지 못한 결과를 기록합니다. 앞선 OAuth 실패는 과거 실행 결과이며, 현재 장애와 구분합니다. 실제 직원 인계 및 다중 모델 완료는 여전히 검증되지 않았습니다.
+
+[Windows Sonnet 실제 연속 협업 보고서](../verification/windows-schema-live/report.md)는 후속 수정으로 기존 `WikiResponseSchema`를 Claude CLI structured output에 강제하고, Sonnet IngesTiger → Opus 전문 직원 → Sonnet Corpus Keeper의 실제 연속 협업을 완료한 기록입니다. CLI 2.1.263 호환을 위해 JSON Schema는 draft-07로 직렬화하지만 호스트 Zod/Python 검사는 그대로 유지합니다. 구조화 출력은 형식만 보장하므로 테스트 검토자의 의미 대조와 정본 반영 단계는 생략하지 않습니다.

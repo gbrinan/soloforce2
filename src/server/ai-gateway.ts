@@ -1,3 +1,4 @@
+import { gatewayResponseText } from './ai-gateway-response.js';
 // 호스트 AI 게이트웨이 — 앱 AI 호출을 코어 한 곳으로 모아 인증·합산 레이트리밋·비용을 일원화한다.
 // @mycrew/ai-client가 MYCREW_AI_GATEWAY_URL 설정 시 로컬 claude 스폰 대신 이 엔드포인트로 위임한다.
 // 서버는 127.0.0.1 바인딩이라 로컬 앱↔코어 전용이지만, 토큰으로 임의 로컬 프로세스의 무단 소모를 차단한다.
@@ -74,6 +75,7 @@ export interface GatewayRunResult {
 }
 
 interface ClaudeJsonEnvelope {
+  structured_output?: unknown; is_error?: boolean;
   result?: string; total_cost_usd?: number; duration_ms?: number; model?: string;
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 }
@@ -93,6 +95,7 @@ export interface GatewayRunOptions {
   provider?: "claude" | "ollama";
   /** Structured ingestion: no tools, MCP, slash commands, persistence or warm-up calls. */
   isolatedText?: boolean;
+  jsonSchema?: Record<string, unknown>;
 }
 
 // 프롬프트는 stdin(`-p -`)으로 전달해 대용량(디자인 클론 등)에서도 argv 한도에 걸리지 않게 한다.
@@ -188,6 +191,7 @@ const warmPool = new Map<string, WarmEntry>();
 
 export function buildBaseArgs(opts: GatewayRunOptions): string[] {
   const args: string[] = [];
+  if (opts.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
   if (opts.isolatedText) args.push('--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--disable-slash-commands', '--no-session-persistence');
   args.push("--model", opts.model || GW_DEFAULT_MODEL);
   if (opts.systemPrompt) args.push("--append-system-prompt", opts.systemPrompt);
@@ -321,7 +325,7 @@ export async function runGatewayClaude(opts: GatewayRunOptions): Promise<Gateway
   try {
     // 1) 워밍 프로세스가 준비돼 있으면 두 번째 턴으로 즉시 처리 (~2초)
     const warm = warmPool.get(key);
-    if (!opts.isolatedText && WARM_POOL_ENABLED && warm?.state === "ready") {
+    if (!opts.isolatedText && !opts.jsonSchema && WARM_POOL_ENABLED && warm?.state === "ready") {
       try {
         const result = await runOnWarm(warm, opts);
         ensureWarm(key, baseArgs); // 다음 요청 대비 보충
@@ -331,7 +335,7 @@ export async function runGatewayClaude(opts: GatewayRunOptions): Promise<Gateway
       }
     }
     // 2) 콜드 경로 (설정 미로드로 기존 대비 단축) + 다음 요청 대비 워밍 스폰
-    if (!opts.isolatedText) ensureWarm(key, baseArgs);
+    if (!opts.isolatedText && !opts.jsonSchema) ensureWarm(key, baseArgs);
     // 스트리밍 요청은 콜드에서도 stream-json으로 델타를 흘린다 (P0-②)
     const outputArgs = opts.onText
       ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
@@ -342,7 +346,7 @@ export async function runGatewayClaude(opts: GatewayRunOptions): Promise<Gateway
           .find((e) => e?.type === "result") ?? {}) as ClaudeJsonEnvelope
       : JSON.parse(stdout.trim()) as ClaudeJsonEnvelope;
     return {
-      text: (env.result ?? "").trim(),
+      text: gatewayResponseText(env, Boolean(opts.jsonSchema)),
       costUsd: env.total_cost_usd,
       durationMs: env.duration_ms,
       model: env.model,
