@@ -82,6 +82,8 @@ console.log(`   PII deny-list: ${PII_TOKENS.length}종 로드 (.pii-guard.json)`
 const INCLUDE_DIRS = ['src', 'tests', 'prompts', 'config', 'tools', 'apps', 'assets'];
 
 const SHIP_SCRIPTS = new Set([
+  'codex-runtime-test.ts',
+  'training-pipeline-smoke.mjs',
   'store-preseed-installed.ts',
   'fix-pty-perms.cjs',
   'package-program.mjs',
@@ -160,14 +162,14 @@ function isExcludedBasename(name) {
 const SHIP_AGENT_IDS = (() => {
   try {
     const d = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'agents-default.json'), 'utf8'));
-    return new Set([...(d.agents || []).map((a) => a.id), 'genie']);
+    return new Set([...(d.agents || []).map((a) => a.id), 'genie', 'training-architect', 'training-designer']);
   } catch {
-    return new Set(['dev-pm', 'planner-researcher', 'qa', 'genie']);
+    return new Set(['dev-pm', 'planner-researcher', 'qa', 'genie', 'training-architect', 'training-designer']);
   }
 })();
 
 function isNonBaselineAgentEntry(entryName) {
-  const segs = entryName.split(path.sep);
+  const segs = entryName.split(/[\\/]/);
   const ai = segs.indexOf('agents');
   if (ai !== -1 && segs.length > ai + 1) {
     const agentId = segs[ai + 1];
@@ -177,6 +179,9 @@ function isNonBaselineAgentEntry(entryName) {
 }
 
 const INCLUDE_ROOT_FILES = [
+  'templates/training-pipeline.json',
+  'docs/training-designer.md',
+  'docs/training-prepublish-test.md',
   'package.json',
   'package-lock.json',
   'tsconfig.json',
@@ -258,7 +263,7 @@ for (const dir of INCLUDE_DIRS) {
   }
   console.log(`  추가: ${dir}/`);
   archive.directory(dirPath, `${PREFIX}/${dir}`, (entry) => {
-    const parts = entry.name.split(path.sep);
+    const parts = entry.name.split(/[\\/]/);
     if (parts.some((p) => ['node_modules', 'dist', '.git', '.git.disabled', '.next', 'tmp', 'history', 'plans', 'uploads', 'history-backups', '.baseline', '.data', '.build-logs', 'docs', '.scratch', '_diag', '.tmp-qa'].includes(p))) {
       return false;
     }
@@ -343,7 +348,7 @@ if (withOptionalApps) {
     }
     console.log(`  추가: ${app.zipPath}/`);
     archive.directory(app.source, `${PREFIX}/${app.zipPath}`, (entry) => {
-      const parts = entry.name.split(path.sep);
+      const parts = entry.name.split(/[\\/]/);
       if (parts.some((p) => ['node_modules', 'dist', '.git', 'data', 'models', 'tmp', '.next', '.baseline'].includes(p))) {
         return false;
       }

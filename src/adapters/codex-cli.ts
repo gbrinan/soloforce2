@@ -8,6 +8,7 @@ import { PROJECT_SELF_DIR, PROJECTS_DIR, MYCREW_HOME, TSX_BIN, TSX_CLI_ARGS } fr
 import { computeMemoryDir } from "../mcp/memory-dir.js";
 import { safeKill } from "../server/utils/platform.js";
 import { findLatestCodexSessionModel } from "./codex-session-model.js";
+import { codexEventError, resolveCodexWriteRoots } from "./codex-runtime.js";
 
 const CODEX_PATH = process.env.CODEX_PATH || "codex";
 const PROCESS_TIMEOUT = 60 * 60 * 1000;
@@ -20,6 +21,7 @@ const SAFE_ENV_KEYS = [
   "WORKSPACE_ROOT", "PROJECTS_FOLDER", "PORT", "NGROK_URL", "TUNNEL_URL",
   "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
   "SSL_CERT_FILE", "SSL_CERT_DIR",
+  "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "COMSPEC", "WINDIR", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
 ];
 
 function safeChildEnv(): Record<string, string> {
@@ -101,23 +103,20 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
   const toml = [
     `# mycrew auto-generated codex config (job=${safefsEnv.MCP_JOB_ID})`,
     ``,
-    // [로컬 패치 2026-07-18] codex 0.144 exec 모드가 MCP 도구 호출을 승인 대상으로 취급해
-    // 비대화형에서 자동 취소하던 문제 — 승인은 safefs가 자체 수행하므로 codex 단 승인은 끔.
-    `approval_policy = "never"`,
+    `approval_policy = "on-request"`,
+    `approvals_reviewer = "auto_review"`,
     // [로컬 패치 2026-07-18] 0.144는 CLI --sandbox보다 config가 우선 — 쓰기 허용 루트를 config에 명시
     `sandbox_mode = "workspace-write"`,
     ``,
     `[sandbox_workspace_write]`,
-    `writable_roots = [${(safefsEnv.MCP_WRITE_PATHS || "")
-      .split(",")
-      .filter(Boolean)
-      .map((w) => {
-        const cleaned = w.replace(/^\//, "").replace(/\/?\*\*$/, "");
-        return JSON.stringify(join(PROJECT_SELF_DIR, cleaned));
-      })
+    `writable_roots = [${resolveCodexWriteRoots((safefsEnv.MCP_WRITE_PATHS || "").split(",").filter(Boolean))
+      .map((root) => JSON.stringify(root))
       .join(", ")}]`,
     ``,
+    ...(process.platform === "win32" ? [`[windows]`, `sandbox = "unelevated"`, ``] : []),
     `[mcp_servers.safefs]`,
+    `required = true`,
+    `startup_timeout_sec = 30`,
     `command = ${JSON.stringify(TSX_BIN)}`,
     `args = ${argsJson}`,
     ``,
@@ -179,6 +178,11 @@ function spawnCodex(
 
     const processEvent = (event: Record<string, unknown>) => {
       const t = event.type;
+      const failure = codexEventError(event);
+      if (failure) {
+        isError = true;
+        errorMsg = failure;
+      }
 
       if (t === "thread.started" && typeof event.thread_id === "string") {
         sessionId = event.thread_id;
@@ -219,11 +223,6 @@ function spawnCodex(
         }
       }
 
-      if (t === "error") {
-        isError = true;
-        errorMsg = String(event.message ?? event.error ?? "codex error");
-      }
-
       if (options?.onSystemMessage) {
         try { options.onSystemMessage(event); } catch { /* */ }
       }
@@ -257,7 +256,7 @@ function spawnCodex(
       }
       const stderr = Buffer.concat(errChunks).toString("utf-8");
       const output = finalText || streamingText;
-      if (code === 0 || output) {
+      if (isError || code === 0 || output) {
         resolve({ output, sessionId, cost, isError, errorMsg });
       } else {
         reject(new Error(`codex exited ${code}: ${stderr || "(no stderr)"}${cwd ? ` (cwd: ${cwd})` : ""}`));
@@ -275,6 +274,8 @@ export const codexCliAdapter: AgentAdapter = {
   id: "codex-cli",
   supportedModels: [
     { id: "auto", label: "Codex 자동 라우팅 (기본)" },
+    { id: "gpt-6-astra", label: "GPT-6 Astra" },
+    { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
     { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5-codex", label: "GPT-5 Codex (코드 작업)" },
     { id: "gpt-image-2", label: "GPT Image 2 (이미지 생성/편집)" },
@@ -299,13 +300,12 @@ export const codexCliAdapter: AgentAdapter = {
 
     const args: string[] = [
       "exec", "-",
-      "--experimental-json",
+      "--json",
       "--sandbox", "workspace-write",
       "--skip-git-repo-check",
     ];
     if (config.writePaths) {
-      for (const p of config.writePaths) {
-        const abs = p.startsWith("/") ? join(PROJECT_SELF_DIR, p.replace(/^\//, "")) : p;
+      for (const abs of resolveCodexWriteRoots(config.writePaths)) {
         args.push("--add-dir", abs);
       }
     }

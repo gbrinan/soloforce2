@@ -1,0 +1,17 @@
+{
+  "agent": "training-architect",
+  "skipOutput": false,
+  "request": "기업 정보 없이 초급 직원 대상 90분 실습 교육의 초안을 만든다. 학습자는 일반 AI 채팅과 파일 업로드만 가능하며 외부 연동과 설치는 불가하다. 합성 데이터로 업무 우선순위를 판단하고 10분 재시연을 포함한다. 공동 출력 경로는 history/outputs/training-designer/training-demo/ 이다. 각 단계는 지정된 작업만 수행하고 정본 파일 경로와 미확인 사항을 다음 단계에 전달한다. 1단계에 한해서 요구사항·환경 적합성·시간표·스토리·데이터 구조만 설계하여 brief.md, curriculum.md, design-decisions.md를 작성한다. 2단계부터는 지정된 원고 작성·검토·수정을 순서대로 수행한다. 이전 작업물이 있는 경우 먼저 읽고 변경 이력을 유지한다.",
+  "stages": [
+    "교육 구조 설계: 요구와 제약을 확인하고 정본 설계를 인계",
+    "교안 작성: 정본 설계에 따라 차시 MD·합성 CSV·기대 답안·슬라이드 계획·발표 노트 작성",
+    "현업 검토: 실제 파일을 읽어 환경·시간·데이터·노트를 검토하고 review.md에 판정과 수정 지시 작성",
+    "수정 및 인계: review.md를 반영하고 validation.md·handoff.md·README.md 갱신; BLOCKED는 재개 조건 보고, 미해결 항목은 완료로 표시하지 않음"
+  ],
+  "stageAgents": [
+    "training-architect",
+    "training-designer",
+    "training-architect",
+    "training-designer"
+  ]
+}

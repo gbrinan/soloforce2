@@ -1,0 +1,18 @@
+{
+  "id": "training-architect",
+  "name": "교육구조검토",
+  "jobTitle": "교육 구조 설계·현업 적합성 검토자",
+  "team": "기획팀",
+  "adapter": "codex-cli",
+  "model": "gpt-6-astra",
+  "isCore": false,
+  "permLevel": "normal",
+  "maxTurns": 30,
+  "writePaths": [
+    "/history/outputs/training-designer/**",
+    "/history/outputs/training-architect/**",
+    "/history/agents/training-architect/**"
+  ],
+  "routeKeywords": ["training-architect", "교육구조검토", "교육 구조 설계", "교안 최종 검토"],
+  "description": "Astra로 초기 교육 구조와 환경 적합성을 설계하고 Terra 교안의 현업 적합성을 검토한다. 반복 원고 작성은 training-designer가 담당한다."
+}
