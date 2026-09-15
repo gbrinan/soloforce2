@@ -67,6 +67,19 @@ git log -1 --oneline
 
 `localhost`와 `127.0.0.1`을 섞지 않습니다. [Drive·Notion 계정 설정 및 처리 범위](config/corpus/README.md)를 확인하고, 실제 로그인·권한 동의·약관 동의는 사용자가 진행합니다.
 
+#### Claude 계정과 Google 데이터 계정 구분
+
+Claude Code 로그인 계정과 Gmail·Drive의 Google 계정은 서로 다른 인증 주체입니다. Claude 로그인 이메일만 보고 어느 Gmail 편지함이나 Drive가 연결됐는지 판단하지 않습니다.
+
+| 용도 | 정본 경로 | 성공 판정 |
+|---|---|---|
+| Claude 모델 호출 | WSL에서 실행하는 `claude`의 OAuth 로그인 | 선택한 모델로 짧은 실제 호출 성공 |
+| Gmail 읽기 | `claude.ai Gmail` MCP 연결 | 해당 직원 세션에서 `list_labels` 뒤 `search_threads` 실제 호출 성공 |
+| Drive 자료 수집 | `GOOGLE_DRIVE_CONNECTOR_*`와 프로젝트 `.connections` | `/api/connections/google-drive/connections`의 활성 계정과 실제 파일 목록 호출 성공 |
+| 앱 소유자 | `MYCREW_OWNER_EMAIL` | 앱 세션의 소유자 이메일과 운영 기준 계정 일치 |
+
+Google 업무 계정 하나를 정본으로 정하고 Gmail, Drive, `MYCREW_OWNER_EMAIL`에 같은 주소를 사용합니다. Claude 구독 계정은 달라도 됩니다. Gmail MCP 권한은 직원 세션마다 다르게 보일 수 있으므로 새 세션과 PTY 재시작 뒤 최소 읽기 호출을 다시 확인합니다. Drive 연결을 다시 만들기 전에 기존 활성 연결의 `connectionId`가 ingest manifest에 참조되는지 확인하고, 참조되지 않는 중복만 제품의 연결 해제 기능으로 폐기합니다. 레코드나 암호화 토큰 파일을 직접 삭제하지 않습니다.
+
 ### 4. 설치·검증·실행
 
 IngesTiger Wiki 분석·정본 기능을 사용하려면 Python 3도 준비합니다. PowerShell에서 `python --version`을 확인하세요. 실행명이 다르면 `py -3 -c "import sys; print(sys.executable)"`로 경로를 확인하고 `.env`의 `INGESTIGER_PYTHON`에 실제 실행 파일 경로를 적습니다. 인자와 바깥 따옴표는 넣지 않습니다. [Wiki 후보 사용법](config/wiki/README.md)

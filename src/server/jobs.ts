@@ -3483,6 +3483,12 @@ export async function restartSelf(): Promise<void> {
   mkdirSync(join(PROJECT_SELF_DIR, "history"), { recursive: true });
   writeFileSync(flagPath, new Date().toISOString());
 
+  const isSystemdManaged = Boolean(process.env.INVOCATION_ID || process.env.JOURNAL_STREAM);
+  if (isSystemdManaged) {
+    console.log("[Self] systemd supervisor에 재시작을 요청합니다");
+    process.exit(75);
+  }
+
   const { spawn } = await import("node:child_process");
   const { openSync } = await import("node:fs");
   const logPath = join(tmpdir(), "teamLGS.log");
