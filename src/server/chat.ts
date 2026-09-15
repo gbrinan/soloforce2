@@ -489,7 +489,9 @@ async function runRestartSafetyGate(): Promise<RestartGateResult> {
     return { ok: false, stage: "health", detail: `임시 포트 확보 실패: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  const dryRunLog = join(PROJECT_SELF_DIR, "history", `.dry-run-${port}.log`);
+  // 설치 릴리스는 읽기 전용이고 history/가 없을 수 있다. 런타임 데이터 루트에 기록해야
+  // systemd 배포에서도 안전 재시작 게이트가 임시 서버를 띄울 수 있다.
+  const dryRunLog = join(ROOT_HISTORY_DIR, `.dry-run-${port}.log`);
   let pid = -1;
   try {
     pid = await spawnDryRunTestServer(port, dryRunLog);
