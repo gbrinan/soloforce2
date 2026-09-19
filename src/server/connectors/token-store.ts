@@ -303,6 +303,25 @@ export class ConnectorTokenStore {
     throw new ConnectorAuthError(provider.id, "refresh_failed", lastDetail);
   }
 
+  /**
+   * 이 env 토큰으로 이미 승격돼 있나. 금고에 봉인된 값과 대조한다.
+   * 사람이 .env의 토큰을 새 값으로 갈아끼웠다면 다시 시도할 자격이 있으므로 false를 돌려
+   * 실패 상태(needs_reauth/misconfigured)를 걷어내고 재승격한다.
+   */
+  #alreadyAdopted(provider: ConnectorProviderDef, token: string): boolean {
+    let stored: ConnectorSecret | null;
+    try {
+      stored = this.#vault.read(provider.id);
+    } catch {
+      return false;   // 금고를 못 읽는다 = 키 교체 등 — 재승격으로 복구를 시도한다
+    }
+    if (!stored) return false;
+    // 노션 정적 토큰은 그 자체가 액세스 토큰, 구글 env 값은 refresh token이다.
+    return provider.id === "notion"
+      ? stored.accessToken === token
+      : stored.refreshToken === token;
+  }
+
   #markState(record: ConnectionRecord, state: ConnectionState, detail: string): void {
     this.#putRecord(ConnectionRecordSchema.parse({
       ...record,
@@ -319,7 +338,14 @@ export class ConnectorTokenStore {
     if (existing && !existing.fromEnv) return;
     const token = this.staticToken(provider);
     if (!token) return;
-    if (existing?.fromEnv && existing.state === "connected") return;
+    if (existing && this.#alreadyAdopted(provider, token)) {
+      // ★ 이미 이 env 토큰으로 승격된 기록이 있으면 상태를 건드리지 않는다.
+      // 예전에는 state가 connected일 때만 건너뛰었는데, 그러면 needs_reauth·misconfigured가
+      // 매 조회마다 connected로 되살아나 죽은 토큰으로 무한 갱신을 시도했다
+      // (2026-09-19 재현: 4회 호출 = 토큰 엔드포인트 4회 타격). 실패 상태는 그대로 둬야
+      // getAccessToken이 네트워크를 타기 전에 끊는다.
+      return;
+    }
     if (provider.id === "notion") {
       // 노션 내부 통합 토큰은 그 자체가 액세스 토큰이고 만료되지 않는다.
       this.saveGrant({

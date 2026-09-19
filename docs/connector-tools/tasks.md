@@ -7,7 +7,7 @@ OAuth 만료를 복구 가능한 상태로 바꾼다.
 
 ## Current Phase
 
-✅ Phase 6: 로컬 완주 준비 (L3·L4는 사용자 머신에서 실행 대기)
+✅ Phase 7: 재검토 (L3·L4는 사용자 머신에서 실행 대기)
 
 ## Phases
 
@@ -59,6 +59,15 @@ OAuth 만료를 복구 가능한 상태로 바꾼다.
 - [x] L4가 설정 화면에서 만든 실제 연결을 사용 (refresh token 수동 추출 불필요)
 - [x] `e2e.md`의 잘못된 절차 교정 (금고 위치·추출 불가 명시)
 - [x] 부팅 경로 회귀 확인 (서버 실기동)
+
+### Phase 7: 재검토 ✅
+
+- [x] 결함 5 — env 정적 토큰의 실패 상태 유지 (재현 → 수정 → T8)
+- [x] 결함 6 — `connected`를 파일에 저장하지 않음 (`toStored`)
+- [x] 결함 7 — 게이트 변경 시에만 PTY 재spawn
+- [x] `notion_update_page` 제목 속성 자동 탐색
+- [x] `drive_read_file_content` 바이너리 거절
+- [x] `/api/connectors/*` 인증 감사 (전역 ssoMiddleware가 덮음 — 결함 아님)
 
 ## Out of Scope
 

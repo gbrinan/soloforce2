@@ -272,6 +272,57 @@ async function t7_misconfiguredIsNotReauth(): Promise<void> {
   console.log("  T7 설정 오류 ≠ 재동의 (재시도 없음·차단 없음) ✓");
 }
 
+/**
+ * T8 — env 정적 토큰(.env의 GOOGLE_OAUTH_REFRESH_TOKEN) 경로의 상태 유지.
+ *
+ * 2026-09-19 재현으로 잡은 결함: env 승격 로직이 state를 보고 건너뛰는 바람에
+ * needs_reauth가 매 호출마다 connected로 되살아나, 죽은 토큰으로 토큰 엔드포인트를
+ * 무한 타격했다. T3는 saveGrant(OAuth 경로)만 써서 이 경로를 통과한 적이 없었다.
+ */
+async function t8_envTokenKeepsFailureState(): Promise<void> {
+  const temp = mkdtempSync(join(tmpdir(), "connector-test-"));
+  const envKey = Buffer.alloc(32, 9).toString("base64");
+  let calls = 0;
+  const build = (refreshToken: string, exchange: () => Promise<TokenGrant>) => new ConnectorTokenStore({
+    historyDir: temp,
+    env: {
+      SOLOFORCE_CONNECTION_ENCRYPTION_KEY: envKey,
+      GOOGLE_OAUTH_CLIENT_ID: "cid",
+      GOOGLE_OAUTH_CLIENT_SECRET: "sec",
+      GOOGLE_OAUTH_REFRESH_TOKEN: refreshToken,
+    },
+    exchangeRefreshToken: exchange,
+  });
+
+  const dead = build("dead-token", async () => {
+    calls += 1;
+    throw new RefreshRejectedError("토큰 엔드포인트 거부 (HTTP 400, invalid_grant)");
+  });
+
+  for (let i = 0; i < 3; i += 1) {
+    const error = await dead.getAccessToken("google").then(() => null, (e: unknown) => e);
+    assert.ok(error instanceof ConnectorAuthError);
+    assert.equal(error.reason, "needs_reauth");
+  }
+  assert.equal(calls, 1,
+    "폐기된 env 토큰은 한 번만 시도해야 한다 — 매 호출 재시도는 공급자를 때리고 영영 안정되지 않는다");
+  assert.equal(dead.getRecord("google")?.state, "needs_reauth", "실패 상태가 유지돼야 한다");
+
+  // 사람이 .env의 토큰을 새 값으로 갈아끼웠다 → 다시 시도할 자격이 있다.
+  let freshCalls = 0;
+  const rotated = build("brand-new-token", async () => {
+    freshCalls += 1;
+    return { accessToken: "access-ok", refreshToken: null, expiresInSec: 3600, grantedScopes: [] };
+  });
+  assert.equal(await rotated.getAccessToken("google"), "access-ok",
+    "env 토큰이 바뀌면 실패 상태를 걷어내고 다시 시도해야 한다");
+  assert.equal(freshCalls, 1);
+  assert.equal(rotated.getRecord("google")?.state, "connected");
+
+  rmSync(temp, { recursive: true, force: true });
+  console.log("  T8 env 토큰 실패 상태 유지 + 토큰 교체 시 복구 ✓");
+}
+
 async function main(): Promise<void> {
   console.log("[connector-token-test] 시작");
   try {
@@ -282,6 +333,7 @@ async function main(): Promise<void> {
     await t5_refreshTokenSurvivesRotationlessResponse();
     await t6_policyBecomesSpawnGates();
     await t7_misconfiguredIsNotReauth();
+    await t8_envTokenKeepsFailureState();
   } finally {
     cleanup();
   }

@@ -158,10 +158,22 @@ export function updateServicePolicy(id: string, patch: Partial<ServicePolicy>): 
     const existing = existsSync(POLICIES_FILE)
       ? JSON.parse(readFileSync(POLICIES_FILE, "utf-8"))
       : { version: "1" };
-    writeFileSync(POLICIES_FILE, JSON.stringify({ ...existing, services: policies }, null, 2), "utf-8");
+    writeFileSync(POLICIES_FILE, JSON.stringify({ ...existing, services: policies.map(toStored) }, null, 2), "utf-8");
   } catch { /* best-effort */ }
 
   return updated;
+}
+
+/**
+ * 디스크에 쓸 형태로 되돌린다.
+ *
+ * loadServicePolicies()가 `connected`를 실제 토큰 상태로 덮어 주므로, 그 값을 그대로
+ * 쓰면 파일이 다시 "표시만 되고 실체 없는 연결"을 주장하게 된다 — 이 리포가 2026-09-04에
+ * 고친 결함 1이 바로 그것이었다. 커넥터가 떠받치는 서비스는 항상 false로 눕혀 둔다:
+ * 저장된 값은 참조되지 않고, 파일만 읽는 사람에게 거짓을 말하지도 않는다.
+ */
+function toStored(policy: ServicePolicy): ServicePolicy {
+  return SERVICE_PROVIDER[policy.id] ? { ...policy, connected: false } : policy;
 }
 
 // ── 승인 대기 큐 ────────────────────────────────────────────────────────────

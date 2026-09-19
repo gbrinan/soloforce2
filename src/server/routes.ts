@@ -185,7 +185,7 @@ import { extractYouTubeId, fetchYouTubeTranscript, generateShortSummary, generat
 import { ensureBaseline, computeDiff, applyAutoMergeable, applyUserChoice, rollback } from "./config-sync.js";
 import { getKeyEntries, getKeyRawValue, saveServerKey, deleteServerKey, validateKeyFormat } from "./key-vault.js";
 import { writeEnvKey } from "./utils/safeEnvWriter.js";
-import { loadServicePolicies, updateServicePolicy, resolveApproval as resolveToolApproval } from "./service-policies.js";
+import { loadServicePolicies, updateServicePolicy, resolveApproval as resolveToolApproval, getConnectorToolGates } from "./service-policies.js";
 import {
   loadContacts,
   listContacts,
@@ -3813,7 +3813,13 @@ export function registerRoutes(app: Hono): void {
     const body = await c.req.json<{ enabled?: boolean; readPolicy?: string; writePolicy?: string }>().catch(() => null);
     if (!body) return c.json({ error: "invalid body" }, 400);
     try {
+      // 커넥터 도구 게이트는 spawn 시점에 CLI 인자·MCP config로 굳는다 — 정책만 바꾸면
+      // 돌고 있는 PTY는 옛 게이트를 그대로 쓴다. 게이트가 실제로 달라졌을 때만 재spawn한다
+      // (MCP 서버 할당 변경이 mcp-registry에서 같은 이유로 재spawn하는 것과 같은 근거).
+      const before = JSON.stringify(getConnectorToolGates());
       const updated = updateServicePolicy(id, body as { enabled?: boolean; readPolicy?: "auto" | "approval"; writePolicy?: "auto" | "approval" });
+      const after = JSON.stringify(getConnectorToolGates());
+      if (before !== after) void respawnForConnectorGates();
       return c.json({ ok: true, service: updated });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 404);
@@ -4723,4 +4729,21 @@ export function registerRoutes(app: Hono): void {
     if (!req) return c.json({ error: "not found or already resolved" }, 404);
     return c.json(req);
   });
+}
+
+
+/**
+ * 커넥터 게이트가 바뀌었을 때 지니·워커 PTY를 새 spawn 인자로 되살린다.
+ * 동적 import는 순환(terminal-ws → routes)을 피하려는 것으로 mcp-registry와 같은 패턴이다.
+ */
+async function respawnForConnectorGates(): Promise<void> {
+  try {
+    const tw = await import("./terminal-ws.js");
+    void tw.ptyRespawnForReset();
+    const wp = await import("./worker-pty.js");
+    for (const agent of getAllWorkerAgents()) wp.resetWorker(agent.id);
+    console.log("[ServicePolicy] 커넥터 게이트 변경 — 지니/워커 재spawn");
+  } catch (e) {
+    console.error("[ServicePolicy] 게이트 변경 재spawn 실패:", e instanceof Error ? e.message : e);
+  }
 }

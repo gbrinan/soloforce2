@@ -112,6 +112,13 @@ function tool<S extends z.ZodRawShape>(
 const DRIVE = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_FIELDS = "files(id,name,mimeType,modifiedTime,owners(emailAddress),webViewLink,size),nextPageToken";
 
+/** 텍스트로 안전하게 디코드할 수 있는 형식인가 (json/xml/csv 등 +접미사 포함). */
+function isTextLike(mimeType: string): boolean {
+  return mimeType.startsWith("text/")
+    || /^application\/(json|xml|x-ndjson|javascript|sql|yaml|x-yaml)(;|$)/.test(mimeType)
+    || /\+(json|xml)(;|$)/.test(mimeType);
+}
+
 /** 구글 네이티브 문서는 바이트가 없다 — export로 텍스트를 뽑아야 한다. */
 const EXPORT_AS: Record<string, string> = {
   "application/vnd.google-apps.document": "text/plain",
@@ -141,7 +148,16 @@ tool("google-drive", "drive_read_file_content", "구글 드라이브 파일의 �
   maxChars: z.number().int().min(200).max(200_000).default(40_000),
 }, async ({ fileId, maxChars }) => {
   const meta = await callApi("google", `${DRIVE}/${encodeURIComponent(fileId)}?fields=id,name,mimeType`) as { name?: string; mimeType?: string };
-  const exportMime = EXPORT_AS[meta.mimeType ?? ""];
+  const mimeType = meta.mimeType ?? "";
+  const exportMime = EXPORT_AS[mimeType];
+  if (!exportMime && !isTextLike(mimeType)) {
+    // 바이너리를 문자열로 디코드하면 깨진 글자가 에이전트 컨텍스트를 채운다 —
+    // 읽은 척하느니 못 읽는다고 말하는 편이 낫다.
+    throw new Error(
+      `텍스트로 읽을 수 없는 형식입니다 (${mimeType}). `
+      + "구글 문서/스프레드시트/프레젠테이션은 자동 변환되고, 그 외는 텍스트 계열만 읽습니다.",
+    );
+  }
   const url = exportMime
     ? `${DRIVE}/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(exportMime)}`
     : `${DRIVE}/${encodeURIComponent(fileId)}?alt=media`;
@@ -375,13 +391,24 @@ tool("notion", "notion_update_page", "노션 페이지의 제목을 바꾸거나
   pageId: z.string().min(1),
   title: z.string().optional(),
   archived: z.boolean().optional(),
-}, async ({ pageId, title, archived }) => callApi("notion", `${NOTION}/pages/${encodeURIComponent(pageId)}`, {
-  method: "PATCH",
-  body: {
-    ...(archived === undefined ? {} : { archived }),
-    ...(title === undefined ? {} : { properties: { title: { title: [{ text: { content: title } }] } } }),
-  },
-}));
+}, async ({ pageId, title, archived }) => {
+  const id = encodeURIComponent(pageId);
+  let properties: Record<string, unknown> | undefined;
+  if (title !== undefined) {
+    // 제목 속성의 이름은 페이지마다 다르다 — 독립 페이지는 "title", 데이터베이스 행은
+    // 그 DB가 정한 이름(보통 "Name")이다. 고정값으로 쓰면 DB 행 수정이 400으로 튕긴다.
+    const page = await callApi("notion", `${NOTION}/pages/${id}`) as { properties?: Record<string, { type?: string }> };
+    const titleKey = Object.entries(page.properties ?? {}).find(([, v]) => v?.type === "title")?.[0] ?? "title";
+    properties = { [titleKey]: { title: [{ text: { content: title } }] } };
+  }
+  return callApi("notion", `${NOTION}/pages/${id}`, {
+    method: "PATCH",
+    body: {
+      ...(archived === undefined ? {} : { archived }),
+      ...(properties === undefined ? {} : { properties }),
+    },
+  });
+});
 
 tool("notion", "notion_create_comment", "노션 페이지에 코멘트를 단다.", {
   pageId: z.string().min(1),

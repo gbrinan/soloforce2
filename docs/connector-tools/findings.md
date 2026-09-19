@@ -48,6 +48,35 @@ google-drive·gmail·google-calendar·notion·slack을 전부 `connected: true`�
 → RFC 6749 §5.2 오류 코드로 `needs_reauth`(재동의로 나음)와 `misconfigured`(.env 수정으로
 나음)를 가른다. 상세: `e2e.md`.
 
+### 결함 5 — env 정적 토큰이 실패 상태를 되살려 무한 갱신 (재검토, 2026-09-19)
+
+`#adoptStaticToken`이 "state가 connected일 때만 건너뛰기"로 되어 있어, `.env`의
+`GOOGLE_OAUTH_REFRESH_TOKEN`이 폐기된 경우 매 호출마다 `needs_reauth` → `connected` 로
+되살아나고 다시 갱신을 시도했다. **재현: 4회 호출 = 토큰 엔드포인트 4회 타격.** 상태가
+영영 안정되지 않고 공급자를 계속 때린다 — 결함 3·4와 같은 "막다른 골목" 계열이다.
+
+T3이 이를 놓친 이유: T3은 `saveGrant`(OAuth 경로, `fromEnv=false`)만 썼고 env 승격 경로를
+통과한 적이 없었다. → 금고에 봉인된 값과 env 토큰을 대조해, **같으면 상태를 건드리지
+않고** 다르면(사람이 `.env`를 고쳤다) 재승격한다. 계약: T8(양방향).
+
+### 결함 6 — 덮어쓴 `connected`가 파일에 다시 저장됨 (재검토)
+
+`updateServicePolicy`가 `loadServicePolicies()`의 결과를 그대로 기록해, 런타임에 덮은
+`connected: true`가 `config/service-policies.json`에 굳었다. CLAUDE.md에 "저장하지 않는다"고
+적어 둔 불변식을 스스로 어긴 것이고, 결함 1이 만든 것과 똑같은 산출물(실체 없는 연결을
+주장하는 파일)을 다시 만든다. → `toStored()`로 커넥터 서비스의 `connected`를 항상 false로
+눕혀 저장한다.
+
+### 결함 7 — 정책 변경이 돌고 있는 세션에 닿지 않음 (재검토)
+
+커넥터 게이트는 spawn 시점에 CLI 인자(`allowedTools`·PreToolUse 매처)와 MCP config
+(`MCP_CONNECTOR_SERVICES`)로 굳는다. `PATCH /api/service-policies/:id`는 파일만 고치고
+재spawn을 하지 않아, 설정 화면에서 auto↔approval을 바꿔도 **이미 돌고 있는 지니·워커에는
+반영되지 않았다**. 결함 2를 고치며 "정책이 인터랙티브 세션에 닿는다"고 했지만 재spawn
+이후에만 참이었다. → 게이트를 변경 전후로 비교해 **실제로 달라졌을 때만** 재spawn한다
+(mcp-registry가 MCP 할당 변경에 쓰는 것과 같은 근거·같은 패턴). 무관한 서비스나 같은 값
+재지정에는 재spawn하지 않는다 — 재spawn은 사용자의 대화 세션을 끊기 때문이다.
+
 ## 결정
 
 ### D1 — 기존 `google-readonly-*`를 고치지 않고 옆에 짓는다
