@@ -8,6 +8,8 @@ dist/
 
 # 사용자 데이터 (온보딩 시 자동 생성)
 history/
+# 서버가 없으면 기본값으로 생성하는 런타임 설정 (mail-scan.ts) — 커밋 대상 아님
+config/mail-scan-filters.json
 history-backups/
 
 # 멀티 인스턴스 데이터 (.mycrew-A, -B 등)
