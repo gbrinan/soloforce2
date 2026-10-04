@@ -11,7 +11,7 @@ import {
   UpstreamLimitError,
   MAX_DEFERRALS,
 } from "./upstream-limit.js";
-import { formatArtifactListForHandoff, formatQaTargetsWithStamp } from "./utils/path-normalize.js";
+import { formatArtifactListForHandoff, formatQaTargetsWithStamp, isArtifactModifiedSince } from "./utils/path-normalize.js";
 import { join, basename, dirname, isAbsolute, resolve as pathResolve } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import type { AgentConfig, AgentResult, AgentCost, Job, JobStatus } from "../types.js";
@@ -2960,12 +2960,19 @@ function snapshotCodeChanges(cwd: string | undefined): string[] | null {
 //   유령 경로를 만들었다(.posted 26건 실재). 소비처가 표시·전달 4곳이라 링크가 깨지고
 //   QA 핸드오프(§산출물 파일)를 stat하면 오탐 FAIL이 났다.
 //   확장자 목록·경계 규약은 ./utils/artifact-ext.ts 단일 소스로 이관 — 08-08 qa-auto-judge.ts와 공유.
+// [2026-10-05 핫픽스, 잡 938bbcb0] 읽기 전용 참조 경로가 '산출물'로 승격되는 결함 차단.
+//   extractOutputPathsFromText는 라벨을 보지 않고 로그 본문에서 history/… 경로를 통째로 긁으므로
+//   워커가 «읽기만» 한 경로도 산출물이 된다. 그게 QA «판정 대상 고정»으로 넘어가 4일 전 종결호를
+//   피검체로 만들어 FAIL을 유발했다. 기전·근거는 isArtifactModifiedSince 주석에 전부 남겼다.
+//   ⇒ 이 잡이 시작한 뒤 수정된 파일만 산출물로 인정한다(대응 검사).
 function extractOutputFiles(job: Job): string[] {
   const files = new Set<string>();
   for (const log of job.logs) {
     for (const p of extractOutputPathsFromText(log)) files.add(p);
   }
-  return [...files];
+  return [...files].filter((p) =>
+    isArtifactModifiedSince(p, job.cwd || PROJECT_SELF_DIR, job.startedAt),
+  );
 }
 
 function extractPreview(job: Job): string {

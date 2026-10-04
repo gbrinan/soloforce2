@@ -33,6 +33,43 @@ function resolveArtifactAcrossBases(p: string, baseDir: string): string | null {
 }
 
 /**
+ * 보고된 산출물 경로가 «이 잡이 실제로 건드린 파일»인가 — mtime 대응 검사.
+ *
+ * [2026-10-05 · 잡 938bbcb0] 읽기 전용 참조 경로의 산출물 승격 차단.
+ *   jobs.ts의 extractOutputFiles는 라벨을 보지 않고 로그 본문에서 `history/…` 경로를 통째로
+ *   긁는다(qa-auto-judge.ts의 extractArtifactPaths는 라벨 기반인데 이쪽만 아니었다 — 이 비대칭이
+ *   결함). 그래서 `[진행] 파일 읽는 중: history/outputs/repo-scout/ai-release/2026-10-01.json`
+ *   처럼 워커가 **읽기만** 한 경로가 outputFiles 유일 항목이 됐고, QA «판정 대상 고정»으로
+ *   넘어가 4일 전 종결호를 피검체로 만들어 FAIL을 유발했다(QA 0f41d034 → 핫픽스 938bbcb0).
+ *
+ *   ★ 신호는 이미 있었다 — formatQaTargetsWithStamp가 2026-08-21부터 mtime을 찍어 QA에게
+ *     보여주고 있었다. 그 값이 잡 시작보다 4일 빨랐는데도 아무도 그걸로 «거르지» 않았다.
+ *     선언이 아니라 대응으로 게이트한다.
+ *
+ *   ★ 미존재는 여기서 판정하지 않는다(통과시킨다). 유령 차단은 표시 지점
+ *     formatArtifactListForHandoff의 관할이며(2026-08-11 조치), 관할을 겹치면 한쪽 수정이
+ *     다른 쪽을 조용히 무력화한다.
+ *
+ * @param since 기준 시각(보통 job.startedAt). 없으면 비교 기준이 없으므로 통과.
+ */
+export function isArtifactModifiedSince(
+  reportedPath: string,
+  baseDir: string,
+  since: string | undefined,
+): boolean {
+  if (!since) return true;
+  const real = resolveArtifactAcrossBases(reportedPath, baseDir);
+  if (!real) return true;
+  const sinceMs = new Date(since).getTime();
+  if (Number.isNaN(sinceMs)) return true; // 손상된 타임스탬프로 산출물을 지우지 않는다
+  try {
+    return statSync(real).mtimeMs >= sinceMs;
+  } catch {
+    return true; // stat 불가(권한 등) → 기존 동작 보존
+  }
+}
+
+/**
  * macOS NFD 파일명이 조합형(NFC)과 매칭되지 않는 문제를 막는다.
  * 저장·조회 경로는 비교 전에 반드시 이 함수로 형태를 맞춘다.
  */
