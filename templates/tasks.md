@@ -6,6 +6,10 @@
 
 <!-- 명확한 최종 목표를 작성합니다. -->
 
+## Understood As
+
+<!-- 요청을 자기 말로 다시 쓴 한 줄. 사용자 문장을 그대로 옮기면 이해의 증거가 되지 않습니다. -->
+
 ## Current Phase
 
 <!-- 현재 진행 중인 단계를 표시합니다. 이모지: 🔄 진행 중, ✅ 완료, ⏸️ 대기 -->
@@ -39,9 +43,27 @@
 
 ### Phase 4: Testing ⏸️
 
-- [ ] 전체 빌드 확인
-- [ ] 전체 테스트 통과 확인
-- [ ] 수동 테스트 (가능한 경우)
+- [ ] 전체 빌드 확인 (gate: G1)
+- [ ] 전체 테스트 통과 확인 (gate: G2)
+- [ ] 수동 테스트 (가능한 경우) (gate: G3)
+
+## Gates
+
+<!-- 완료를 증명하는 수단. hard 는 종료 코드로 판정되는 백틱 명령, real-surface 는 실제 화면·API·라이브에서 확인하는 방법, manual 은 사람이 확인할 근거.
+     게이트를 단 항목은 progress.md «Gate Evidence»에 PASS 가 있어야 체크할 수 있습니다(scripts/plan-check.cjs). -->
+
+| ID | Claim | Check | Kind |
+| --- | --- | --- | --- |
+| G1 | 빌드가 통과한다 | `npm run build` | hard |
+| G2 | 테스트가 통과한다 | `npm test` | hard |
+| G3 | 실제 화면에서 동작한다 | 브라우저로 해당 화면을 열어 확인 | real-surface |
+
+## Descoped
+
+<!-- 이번 사이클에서 뺀 것. 지우지 않고 이유와 함께 남깁니다(negatives-as-corpus). -->
+
+| Item | Reason | Where it went |
+| --- | --- | --- |
 
 ## Notes
 
