@@ -89,6 +89,9 @@ export function isHealthPing(request: string): boolean {
   return noTools && oneWord;
 }
 
+/** 주 1회 QA 표본에서 제외하는 수집 전용 에이전트(자체 검증 보유). 코드 변경·외부 발신 QA는 그대로다. */
+export const QA_SAMPLE_EXEMPT_AGENTS: ReadonlySet<string> = new Set(["ingestiger", "spf-kakao-collect", "mail-secretary"]);
+
 export function decideQa(input: QaDecisionInput): QaDecision {
   // 0. 옵트아웃 — 새 조건보다 «항상» 세다.
   if (input.qaTriggered) return { run: false, reason: "qa-recursion-guard", isSample: false };
@@ -117,6 +120,13 @@ export function decideQa(input: QaDecisionInput): QaDecision {
   //    실제 통제는 실행 전 단계(루프 승인 모드·safefs 권한 게이트)가 맡는다.
   if (!isLoopDispatched(input.request) && externalSendSuspected(input.agentId, input.request)) {
     return { run: true, reason: "external-send-suspected(되돌릴 수 없음)", isSample: false };
+  }
+
+  // 3-1. 자체 검증이 있는 수집 전용 에이전트는 주 1회 표본에서도 뺀다(2026-10-02 아난 결정).
+  //      ingestiger(인용·구조 검증 내장), spf-kakao-collect(파서 검증), mail-secretary(초안만·발송 불가).
+  //      코드 변경·외부 발신은 위 2·3단계에서 이미 걸러지므로 여기 도달한 건 단순 수집·정리다.
+  if (QA_SAMPLE_EXEMPT_AGENTS.has(input.agentId)) {
+    return { run: false, reason: `sample-exempt(수집 전용·자체 검증: ${input.agentId})`, isSample: false };
   }
 
   // 4. 코드 변경 0건 + 외부 발신 없음 → 주 1회 표본만.
