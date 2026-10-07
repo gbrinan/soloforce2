@@ -1,20 +1,41 @@
 import { z } from 'zod';
 import { createJevQaClient, JevQaError } from './qa-jev.js';
 import type { JevQaClient, JevQaContext, QaProfile } from './qa-jev.js';
+import { redactHead, redactHeadTail } from './jev/redact.js';
+
+// 버전 고정 — 별칭(jev-latest·jev-preview)은 조용히 다른 모델을 가리킬 수 있어 확신도 기준이 어긋난다
+// (jev-decisions/docs/operations.md 1장). 2026-09-26 확인: jev-latest = jev-1.13.0.
+export const PINNED_JEV_MODEL = 'jev-1.13.0';
+// 공식 단가(docs.typesafe.ai/models, 2026-09-26 확인): 입력 $0.042/100만 토큰, 출력 무료.
+export const JEV_INPUT_USD_PER_TOKEN = 0.042 / 1_000_000;
+// 전송 상한(jev-decisions/docs/data-handling.md 2장).
+export const JEV_REQUEST_MAX_CHARS = 2000;
+export const JEV_REPORT_MAX_CHARS = 2000;
 
 const ConfigSchema = z.object({
-  enabled: z.boolean(), apiKey: z.string(), model: z.string().min(1).max(100),
+  enabled: z.boolean(), apiKey: z.string(), model: z.string().regex(/^jev-\d+\.\d+\.\d+$/),
   timeoutMs: z.number().int().min(10).max(10000), minConfidence: z.number().min(0.5).max(1),
 });
 export type QaJevConfig = Readonly<z.infer<typeof ConfigSchema>>;
 export type QaReviewSelection = {
   readonly profile: QaProfile; readonly reason: string; readonly elapsedMs: number;
   readonly model?: string; readonly confidence?: number; readonly inputTokens?: number; readonly outputTokens?: number;
+  /** Jev 호출 비용(USD). 호출이 실제로 일어났을 때만 있다. */
+  readonly costUsd?: number;
+  /** 전송 전 가린 항목 수(원문은 남기지 않는다). */
+  readonly redactions?: Record<string, number>;
+  readonly sentChars?: { readonly request: number; readonly report: number };
 };
+/** 별칭·미설정은 고정 버전으로 바꾼다. 명시한 정식 버전은 그대로 쓴다(버전을 올릴 땐 섀도 재평가 후 env로). */
+export function resolveJevModel(value: string | undefined): string {
+  const v = (value ?? '').trim();
+  return /^jev-\d+\.\d+\.\d+$/.test(v) ? v : PINNED_JEV_MODEL;
+}
+
 export function qaJevConfig(env: NodeJS.ProcessEnv = process.env): QaJevConfig {
   return {
     enabled: env.QA_JEV_ENABLED === 'true', apiKey: env.TYPESAFE_API_KEY ?? '',
-    model: env.QA_JEV_MODEL ?? 'jev-latest', timeoutMs: Number(env.QA_JEV_TIMEOUT_MS ?? 3000),
+    model: resolveJevModel(env.QA_JEV_MODEL), timeoutMs: Number(env.QA_JEV_TIMEOUT_MS ?? 3000),
     minConfidence: Number(env.QA_JEV_MIN_CONFIDENCE ?? 0.85),
   };
 }
@@ -31,11 +52,21 @@ export async function selectQaReview(
   if (!parsed.success) return fallback('invalid-config');
   if (!config.apiKey.trim()) return fallback('missing-key');
   if (!input.request.trim() || !input.report.trim()) return fallback('missing-context');
-  if (input.request.length > 4000 || input.report.length > 12000) return fallback('context-too-large');
+  // 원문 대신 가리고 줄인 텍스트만 보낸다. 예전에는 요청 4,000자·보고서 12,000자 원문을 그대로 보냈다.
+  const request = redactHead(input.request, JEV_REQUEST_MAX_CHARS);
+  const report = redactHeadTail(input.report, JEV_REPORT_MAX_CHARS);
+  const redactions: Record<string, number> = {};
+  for (const [k, v] of Object.entries(request.counts)) redactions[k] = v + (report.counts as Record<string, number>)[k];
+  const sentChars = { request: request.text.length, report: report.text.length };
   try {
-    const answer = await client({ request: input.request, report: input.report }, parsed.data);
-    return { ...answer, profile: answer.confidence >= config.minConfidence ? answer.profile : 'code',
-      reason: answer.confidence >= config.minConfidence ? 'jev-selected' : 'low-confidence', elapsedMs: Date.now() - startedAt };
+    const answer = await client({ request: request.text, report: report.text }, parsed.data);
+    const costUsd = answer.inputTokens * JEV_INPUT_USD_PER_TOKEN;
+    const billed = { model: answer.model, inputTokens: answer.inputTokens, outputTokens: answer.outputTokens, costUsd, redactions, sentChars };
+    // 응답 모델이 고정 버전과 다르면 답을 쓰지 않는다. 비용은 이미 발생했으므로 기록은 남긴다.
+    if (answer.model !== parsed.data.model) return { ...fallback('model-mismatch'), ...billed };
+    const accepted = answer.confidence >= config.minConfidence;
+    return { ...billed, confidence: answer.confidence, profile: accepted ? answer.profile : 'code',
+      reason: accepted ? 'jev-selected' : 'low-confidence', elapsedMs: Date.now() - startedAt };
   } catch (error) {
     if (error instanceof JevQaError) return fallback(error.reason);
     throw error;

@@ -7,9 +7,9 @@ import { createJevQaClient } from '../src/server/qa-jev.js';
 import { selectQaReview, reviewChecks } from '../src/server/qa-review-plan.js';
 
 const fixture = { request: '주간 매출 보고서를 작성해줘', report: '매출 합계와 전주 비교를 작성했습니다.' };
-const config = { enabled: true, apiKey: 'synthetic-key', model: 'jev-latest', timeoutMs: 100, minConfidence: 0.85 };
+const config = { enabled: true, apiKey: 'synthetic-key', model: 'jev-1.13.0', timeoutMs: 100, minConfidence: 0.85 };
 function answer(profile = 'data', confidence = 0.95) {
-  return { model: 'jev-test', answers: { review_profile: { type: 'choice', choice: profile, confidence,
+  return { model: 'jev-1.13.0', answers: { review_profile: { type: 'choice', choice: profile, confidence,
     probabilities: { code: Number(profile === 'code'), document: Number(profile === 'document'), data: Number(profile === 'data'), general: Number(profile === 'general') } } }, usage: { input_tokens: 123, output_tokens: 12 } };
 }
 async function withEndpoint(body: unknown, status: number, run: (endpoint: string, requests: unknown[]) => Promise<void>) {
@@ -34,13 +34,13 @@ test('Given eligible non-code work, When Jev chooses data, Then route to numeric
     const result = await selectQaReview({ ...fixture, codeChanges: 0 }, config, createJevQaClient(endpoint));
     assert.equal(result.profile, 'data');
     assert.equal(result.reason, 'jev-selected');
-    assert.equal(result.model, 'jev-test');
+    assert.equal(result.model, 'jev-1.13.0');
     assert.equal(result.inputTokens, 123);
     assert.ok(reviewChecks(result.profile).includes('recalculate'));
     assert.ok(!reviewChecks(result.profile).includes('typecheck'));
     assert.equal(requests.length, 1);
     const received = z.object({ method: z.literal('POST'), authorization: z.literal('Bearer synthetic-key'),
-      body: z.object({ model: z.literal('jev-latest'), state: z.object({ request: z.string(), report: z.string() }),
+      body: z.object({ model: z.literal('jev-1.13.0'), state: z.object({ request: z.string(), report: z.string() }),
         questions: z.object({ review_profile: z.object({ type: z.literal('choice'), criteria: z.object({ code: z.string(), document: z.string(), data: z.string(), general: z.string() }) }) }) }) }).parse(requests[0]);
     assert.deepEqual(received.body.state, fixture);
   });
@@ -109,12 +109,20 @@ test('Given API failure, When selecting QA, Then fallback without retry or secre
   });
 });
 
-test('Given excessive or missing context, When selecting QA, Then no provider call', async () => {
+test('Given missing context, When selecting QA, Then no provider call', async () => {
   await withEndpoint(answer(), 200, async (endpoint, requests) => {
-    for (const report of ['', 'x'.repeat(12001)]) {
-      const result = await selectQaReview({ ...fixture, report, codeChanges: 0 }, config, createJevQaClient(endpoint));
-      assert.equal(result.profile, 'code');
-    }
+    const result = await selectQaReview({ ...fixture, report: '', codeChanges: 0 }, config, createJevQaClient(endpoint));
+    assert.equal(result.profile, 'code');
     assert.equal(requests.length, 0);
+  });
+});
+
+// 2026-09-26 0단계 보정: 큰 보고서는 폴백 대신 마스킹 후 2,000자로 줄여 보낸다(jev-decisions/docs/data-handling.md 2장).
+test('Given excessive context, When selecting QA, Then send a bounded payload once', async () => {
+  await withEndpoint(answer(), 200, async (endpoint, requests) => {
+    await selectQaReview({ ...fixture, report: 'x'.repeat(12001), codeChanges: 0 }, config, createJevQaClient(endpoint));
+    assert.equal(requests.length, 1);
+    const body = JSON.stringify(requests[0]);
+    assert.ok(body.length < 6000, `payload not bounded: ${body.length}`);
   });
 });

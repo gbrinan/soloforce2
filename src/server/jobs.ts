@@ -3298,6 +3298,13 @@ TODO 태그 사용 금지.`;
           request: job.request, report: job.fullResult ?? '', codeChanges: jobScopedCodeChanges,
         });
         auditLog('qa.profile_selected', { jobId: job.id, ...review });
+        // Jev 호출 비용을 원장에 남긴다(jev-decisions/docs/operations.md 3장 — 기록 안 되는 통합은 배포 금지).
+        if (review.inputTokens !== undefined && review.costUsd !== undefined) {
+          logCost("qa", job.id, {
+            costUsd: review.costUsd, inputTokens: review.inputTokens, outputTokens: review.outputTokens ?? 0,
+            cacheReadTokens: 0, cacheCreateTokens: 0, durationMs: review.elapsedMs, model: review.model,
+          }, "jev:qa-profile");
+        }
         if (job.status !== 'completed' || job.skipQa || process.env.AUTO_QA_TRIGGER === 'false') return;
 
         // PASS → 기존 QA 흐름 진행
