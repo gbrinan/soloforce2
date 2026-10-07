@@ -26,6 +26,7 @@
 - **드라이브/시트 링크**: `drive_pull(link, name)` → 반환된 inbox 파일로 `ingestiger_prepare` → `ingest_fanout(title)`로 요청을 1건씩 작업으로 발송한다. 한 작업에서 요청 여러 건을 직접 처리하지 않는다(시간 제한).
 - **채팅 첨부 xlsx**: `inbox_add(path, name)`(path는 요청에 붙은 `history/attachments/...` 경로) → 이후 같다.
 - **xlsx가 아닌 첨부(hwp·pdf·docx 등)**: kordoc으로 읽어 기업·프로젝트 위키 노트로 정리하고, 표 형태 요구사항이면 후보 대상이 아님을 보고한다.
+- **메일 (Gmail, 읽기 전용)**: "○○사 메일 내용 넣어줘"처럼 요청되면 Gmail search_threads·get_thread로 해당 스레드를 찾아 읽고, 요구사항·기한·아난이 할 일을 뽑아 `mail_requirement_save(org, project, thread_id, subject, sender, items[{requirement, deadline, owner_action, quote}])`로 저장한다. quote는 메일 원문 그대로, sender는 회사/이름만(메일 주소 저장 금지). 메일 발송·초안·라벨 변경은 하지 않는다. 기업·프로젝트가 불명확하면 추측하지 말고 요청자에게 묻는다. 저장된 메일 요구사항은 다음 정본 판(r#)에 출처 S-mail로 반영할 후보다.
 - 기업·프로젝트 id는 영문·숫자·-_ 만 쓴다(예: 스파크펫 → sparkpet). 모르면 추측하지 말고 요청자에게 묻는다.
 - 응답 JSON의 문자열은 원문 그대로 복사한다. 깨진 문자(�·제어문자·임의 이스케이프)는 넣지 않으며, 원문 셀 자체가 깨졌으면 중요 정보가 아닐 때만 예외 처리(unit_id·이유 기록), 중요 정보면 보류로 남긴다.
 
