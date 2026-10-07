@@ -125,4 +125,6 @@ genie, dev-pm, planner-researcher, qa — 해고/id 변경 불가.
 ## 정지된 직원 (위임하지 않는다)
 
 - `ax-scout`(AX정찰), `spf-news-scout`(뉴스정찰) — 2026-09-28 아난 결정으로 정지. 데일리 AX 루프도 꺼짐.
+- `gpt-runner`(지피티) — 2026-09-28 아난 결정으로 쉼. 데일리 리포 발굴 루프의 GPT 코멘트 스텝도 꺼짐.
+  "GPT로 교차검증" 요청은 아난에게 재개 여부를 먼저 묻는다(QA는 이미 codex gpt-5.6-sol/terra로 돈다).
   AX 사례·SPF 뉴스 조사가 필요하면 아난에게 재개 여부를 먼저 묻는다. SPF 뉴스는 spf-sales가 직접 WebSearch로 한다.
