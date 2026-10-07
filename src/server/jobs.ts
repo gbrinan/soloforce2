@@ -661,7 +661,13 @@ export function checkExpiredLeases(): number {
       acquiredAt: new Date(lease.acquiredAt).toISOString(),
     });
     leases.delete(agentId);
-    if (job && job.status === "running") {
+    // 2026-10-04: 게이트를 "running"에서 «비종결 전체»로 확장.
+    // 구 게이트는 planning·awaiting_approval 상태의 잡을 회수 대상에서 제외했고,
+    // 위에서 leases.delete가 이미 실행되므로 그 잡은 두 번 다시 이 루프에 들어오지 못했다.
+    // → 프로세스는 죽었는데 상태는 활성(planning)으로 영구 잔류하는 좀비가 생기고,
+    //   scheduler의 ACTIVE_JOB_STATUSES가 planning을 활성으로 세기 때문에
+    //   QA 자동 사이클이 "핫픽스 잡이 아직 running" FAIL을 무한 반복했다(실측 6라운드+).
+    if (job && !TERMINAL_JOB_STATUSES.has(job.status)) {
       // 자동 회수: outputs baseline diff로 산출물 작성 여부 확인 (lease 만료 직전 새 보고서 = 워커가 작업 마쳤지만 종료 신호 못 보낸 케이스)
       const recovery = checkOutputsRecovered(job, agentId);
       if (recovery.recovered) {
@@ -3336,9 +3342,21 @@ TODO 태그 사용 금지.`;
         `## 워커 5단 보고/로그 (말미)\n${qaReport}\n\n` +
         `## 산출물 파일\n${outputFilesList}\n\n` +
         `## 🎯 판정 대상 고정 (이 경로·이 시각의 파일만 본다)\n${qaTargets}\n` +
-        `- 위 절대경로 **외의 파일로 판정하지 말 것.** 같은 주제의 구본이 다른 디렉터리에 남아 있을 수 있다.\n` +
-        `- 지적하기 전에 그 문자열을 위 파일에 직접 grep해 부재를 확인할 것. 히트하면 그 지적은 이전 회차 대상(stale)이다.\n` +
-        `- 지적이 전부 stale이어도 **결론 수치는 따로 검산**할 것 — 총계는 맞고 지목만 틀린 FAIL이 실제로 있었다(2026-08-21).\n\n` +
+        // [2026-10-05 핫픽스, 잡 938bbcb0] 산출물 0건 잡의 «검증 불가» 열화 차단.
+        //   아래 3개 지시는 «판정 대상이 있다»를 전제한다. 산출물이 정당하게 0건인 잡
+        //   (예: 인박스 비어서 처리 0건인 루프 표본)에 그대로 붙으면 QA가 피검체 부재를
+        //   근거로 «검증 불가»를 낸다(procedure_qa-target-fixation-fails-…, 2026-10-03).
+        //   읽기 전용 경로를 산출물에서 걷어내면서 이 분기에 들어오는 잡이 늘어나므로 같이 막는다.
+        //   ★ 표본 QA 자체는 끄지 않는다 — «0건이었다»는 주장이 거짓일 수 있고, 그걸 감사하는
+        //     것이 표본의 존재 이유다. 판정을 포기하지 말고 원천에서 확인하라고 지시만 바꾼다.
+        ((job.outputFiles?.length ?? 0) === 0
+          ? `- 산출물 0건은 **그 자체로 결함이 아니다.** 처리할 건이 없었다면 정상이다.\n` +
+            `- 따라서 «피검체 없음»을 이유로 «검증 불가»를 내지 말 것. 대신 워커의 «처리 0건» 주장을\n` +
+            `  **원천에서 직접 확인**해 판정하라(인박스 디렉터리·DB 건수·대상 API를 직접 조회).\n` +
+            `- 원천에 처리할 건이 실제로 없었다면 합격이다. 있었는데 0건이라 보고했다면 불합격이다.\n\n`
+          : `- 위 절대경로 **외의 파일로 판정하지 말 것.** 같은 주제의 구본이 다른 디렉터리에 남아 있을 수 있다.\n` +
+            `- 지적하기 전에 그 문자열을 위 파일에 직접 grep해 부재를 확인할 것. 히트하면 그 지적은 이전 회차 대상(stale)이다.\n` +
+            `- 지적이 전부 stale이어도 **결론 수치는 따로 검산**할 것 — 총계는 맞고 지목만 틀린 FAIL이 실제로 있었다(2026-08-21).\n\n`) +
         qaVerificationInstructions(review.profile);
       // 원본 Job의 Todo 찾기 — QA Job을 같은 Todo에 연결하여 Task 게이지에 표시
       const origTodos = getTodosByJobId(job.id);

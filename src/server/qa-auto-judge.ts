@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { basename, join, isAbsolute } from "node:path";
 import { statSync } from "node:fs";
-import { resolveExistingArtifact } from "./utils/path-normalize.js";
+import { resolveArtifactAcrossBases } from "./utils/path-normalize.js";
 import { ARTIFACT_EXT, EXT_BOUNDARY } from "./utils/artifact-ext.js";
 import type { Job } from "../types.js";
 import { PROJECT_SELF_DIR } from "../config.js";
@@ -125,8 +125,9 @@ export function precheckArtifacts(
     const zeroBaseDir = job.cwd || PROJECT_SELF_DIR;
     const missing: string[] = [];
     for (const rp of required) {
-      const fp = isAbsolute(rp) ? rp : join(zeroBaseDir, rp);
-      if (!resolveExistingArtifact(fp, rp, zeroBaseDir)) missing.push(rp);
+      // 코드 루트·데이터 루트(MYCREW_HOME) 양쪽 해석 — 단일 베이스는 분리 인스턴스에서
+      // 상대경로 산출물 전량을 유령으로 판정한다(상세: resolveArtifactAcrossBases 주석).
+      if (!resolveArtifactAcrossBases(rp, zeroBaseDir)) missing.push(rp);
     }
     // 요구 산출물이 하나라도 실존하면 저장은 된 것(워커가 경로 라벨을 안 적었을 뿐) → PASS.
     // 전부 미존재면 회피 보고로 간주 → FAIL.
@@ -149,12 +150,13 @@ export function precheckArtifacts(
     // 경로 해석: 절대 경로면 그대로, 상대 경로면 job.cwd 기준
     // (mycrew-photos 등 외부 프로젝트 작업 시 올바른 경로에서 검증)
     const baseDir = job.cwd || PROJECT_SELF_DIR;
-    const fullPath = isAbsolute(path) ? path : join(baseDir, path);
 
-    // 존재 검증 (NFC/NFD·bare 파일명 오탐 방지 폴백 포함)
-    const resolvedPath = resolveExistingArtifact(fullPath, path, baseDir);
+    // 존재 검증 (NFC/NFD·bare 파일명 오탐 방지 폴백 + 코드/데이터 루트 양 베이스)
+    const resolvedPath = resolveArtifactAcrossBases(path, baseDir);
     if (!resolvedPath) {
-      failures.push(`파일 미존재: ${path} (검증 경로: ${fullPath})`);
+      // 진단 문구에는 1차 베이스 후보를 남긴다. 실제로는 MYCREW_HOME까지 조회한 뒤의 미존재다.
+      const fullPath = isAbsolute(path) ? path : join(baseDir, path);
+      failures.push(`파일 미존재: ${path} (검증 경로: ${fullPath}, MYCREW_HOME 폴백 포함)`);
       continue;
     }
     

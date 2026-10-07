@@ -43,6 +43,35 @@ check("T3 유령 산출물은 여전히 제외", t3.startsWith("(없음 —"), t
 // T4 (축 격리): mtime·크기 스탬프가 실제로 박힌다 (경로만 맞고 stat이 죽은 경우를 배제)
 check("T4 mtime·크기 스탬프 포함", /mtime \d{4}-.*· \d+B/.test(t1), t1);
 
+// ── 판정기(precheckArtifacts) 자체 ─────────────────────────────────
+// [2026-10-05] T1~T4는 **표시·핸드오프 계층만** 고정한다. 실제 FAIL을 만드는
+// precheckArtifacts는 커밋 5b6ae19 이후에도 단일 베이스를 써서 같은 증상을 계속
+// 생산했는데, 위 4건은 전부 초록이었다 — 초록 스위트가 미배선 경로를 지키고 있었다.
+// 아래 2건이 판정기 경로를 직접 고정한다.
+const { precheckArtifacts } = await import("../src/server/qa-auto-judge.js");
+
+function makeJob(reportedPath: string): import("../src/types.js").Job {
+  return {
+    logs: [`수정 파일: ${reportedPath}`],
+    request: "테스트 작업",
+    cwd: codeRoot,          // ★ 코드 루트 — 산출물은 데이터 루트에 있다
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+  } as unknown as import("../src/types.js").Job;
+}
+
+// T5: 데이터 루트 산출물을 판정기가 실존으로 인정한다 (코드 루트 baseDir로도)
+const t5 = precheckArtifacts(makeJob(rel));
+check("T5 판정기가 데이터 루트 산출물을 PASS", t5.pass, JSON.stringify(t5.failures));
+
+// T6 (음성 대조): 두 베이스 어디에도 없는 파일은 여전히 FAIL — 베이스 확장이
+//     「파일 미존재」 판정을 통째로 무력화하지 않았음을 증명한다.
+const t6 = precheckArtifacts(makeJob(ghost));
+check(
+  "T6 진짜 미존재는 여전히 FAIL (음성 대조)",
+  !t6.pass && t6.failures.some((f) => f.includes("파일 미존재")),
+  JSON.stringify(t6.failures),
+);
+
 rmSync(dataRoot, { recursive: true, force: true });
 rmSync(codeRoot, { recursive: true, force: true });
 
@@ -50,4 +79,4 @@ if (failed > 0) {
   console.error(`${failed}건 실패`);
   process.exit(1);
 }
-console.log("qa-artifact-base-test: 4건 통과");
+console.log("qa-artifact-base-test: 6건 통과");

@@ -21,8 +21,17 @@ import { MYCREW_HOME } from "../../config.js";
  *   유령으로 판정**된다 → 요청문의 «판정 대상 고정»이 "(없음)"이 되고, QA는 피검체가
  *   없어 «검증 불가»를 낸다. 실제 파일은 디스크에 멀쩡히 있었다.
  *   ★ 스코프 제한(동명 파일 오판 방지)은 base별로 그대로 유지된다 — 베이스만 하나 늘린다.
+ *
+ * [2026-10-05 · 판정기까지 확장] 커밋 5b6ae19은 표시·핸드오프 지점만 고쳤고
+ *   qa-auto-judge.ts의 precheckArtifacts(실제 FAIL 판정기)는 여전히
+ *   `job.cwd ?? PROJECT_SELF_DIR` 단일 베이스로 해석해, MYCREW_HOME 분리 인스턴스에서
+ *   「파일 미존재」FAIL을 계속 생산했다 → 이 함수를 export해 판정기도 같은 해석을 쓴다.
+ *   ★ 베이스 확장은 **미존재 오탐만 구제**한다. 두 베이스 어디에도 없으면 그대로 null —
+ *     음성 대조(진짜 미존재 FAIL)는 보존된다.
+ *   ★ 상위 주석의 "precheckArtifacts에 끼워넣지 말 것" 경고는 formatter 2종(유령 제외 표시)
+ *     한정이다. 이 함수는 «경로 해석»이지 «유령 필터»가 아니므로 관할이 겹치지 않는다.
  */
-function resolveArtifactAcrossBases(p: string, baseDir: string): string | null {
+export function resolveArtifactAcrossBases(p: string, baseDir: string): string | null {
   const bases = baseDir === MYCREW_HOME ? [baseDir] : [baseDir, MYCREW_HOME];
   for (const base of bases) {
     const full = isAbsolute(p) ? p : join(base, p);
