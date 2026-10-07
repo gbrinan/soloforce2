@@ -14,6 +14,10 @@ import { startAgentSpan } from "./server/otel-trace.js";
 import { listManifests } from "./server/app-registry.js";
 import { buildMcpServerEntry, getMcpServerDef, resolveCommandPath } from "./server/mcp-registry.js";
 import { resolveEffort } from "./server/effort-policy.js";
+import { computeInvocationCost, SessionCostTracker } from "./server/invocation-cost.js";
+
+// 세션별 CLI 누적 비용 기억 — 재개 호출의 «이번 호출분» 차분 산정용(invocation-cost.ts).
+const sessionCostTracker = new SessionCostTracker();
 
 export interface RunAgentOptions {
   cwd?: string;
@@ -520,8 +524,26 @@ export async function runAgent(
     const sessionId = parsed.session_id as string | undefined;
 
     // 비용/토큰 데이터 추출
+    // ★ 2026-10-02: total_cost_usd 는 세션 누적값이다(--resume 시 직전 비용까지 포함).
+    //   이번 호출분만 남기도록 invocation-cost.ts 로 환산한다(근거는 그 파일 머리말).
+    const cliTotalUsd = typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : 0;
+    const usedModel = model ?? (parsed.modelUsage && typeof parsed.modelUsage === "object" ? Object.keys(parsed.modelUsage)[0] : undefined);
+    const invocation = computeInvocationCost({
+      cliTotalUsd,
+      resumed: !!options.resumeSessionId,
+      prevCumulativeUsd: sessionCostTracker.get(options.resumeSessionId),
+      usage: {
+        inputTokens: parsed.usage?.input_tokens ?? 0,
+        outputTokens: parsed.usage?.output_tokens ?? 0,
+        cacheReadTokens: parsed.usage?.cache_read_input_tokens ?? 0,
+        cacheCreateTokens: parsed.usage?.cache_creation_input_tokens ?? 0,
+      },
+      model: usedModel,
+    });
+    sessionCostTracker.set(sessionId, cliTotalUsd);
     const cost = {
-      costUsd: typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : 0,
+      costUsd: invocation.costUsd,
+      costMethod: invocation.costMethod,
       inputTokens: parsed.usage?.input_tokens ?? 0,
       outputTokens: parsed.usage?.output_tokens ?? 0,
       cacheReadTokens: parsed.usage?.cache_read_input_tokens ?? 0,

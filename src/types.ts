@@ -60,6 +60,8 @@ export interface AgentCost {
   cacheCreateTokens: number;
   durationMs: number;
   model?: string;
+  /** costUsd 산정 방식(cli | session-delta | tokens). 2026-10-02 이전 행에는 없다. */
+  costMethod?: string;
 }
 
 export interface AgentResult {

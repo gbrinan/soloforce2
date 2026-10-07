@@ -27,6 +27,8 @@ export const INTERNAL_SOURCE_TIERS: Record<string, ModelTier> = {
   "job:notify:ok": "cheap",
   "scheduler:notify": "cheap",
   "scheduler:state-change": "cheap",
+  // 자동 진행 정체 시 «무엇이 막혔는지» 한 단락 보고(AI-last). 비재개 단발이라 cheap 으로 충분.
+  "chat:auto-continuation-stalled": "cheap",
   "job:notify:fail": "standard",
   "loop:runner": "standard",
   "scheduler:trigger": "standard",
