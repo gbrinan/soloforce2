@@ -253,6 +253,19 @@ function qaOriginalTitle(request: string): string {
   return line.replace(/\*\*/g, "").slice(0, 80);
 }
 
+/**
+ * "보류" 판정 — 환경(권한·도구·연결) 문제로 QA가 검증 자체를 못 한 경우(2026-09-28).
+ * 합격 처리(조건부 포함)하면 작업이 검증된 것처럼 보이고, 불합격 처리하면 워커에게 무의미한 핫픽스가 간다.
+ * 보류는 둘 다 하지 않고 아난에게 할 일(보고서의 "아난이 할 일" 줄)만 알린다.
+ */
+export function detectQaHold(text: string): { hold: boolean; todo: string } {
+  const all = [...text.matchAll(/종합\s*판정\s*[—–\-]\s*\*\*(보류|합격|불합격|조건부\s*합격)/g)];
+  const last = all[all.length - 1];
+  if (!last || last[1] !== "보류") return { hold: false, todo: "" };
+  const todo = (text.match(/아난이 할 일\s*[:：]\s*([^\r\n]+)/) || [])[1] || "";
+  return { hold: true, todo: todo.replace(/\*\*/g, "").trim() };
+}
+
 export function handleQaJobComplete(job: Job): void {
   if (job.agent !== "qa") return;
   // QA 실행 자체 실패도 버리지 않는다 — 원인을 분류하고 연속 실패면 사람에게 알린다.
@@ -263,6 +276,18 @@ export function handleQaJobComplete(job: Job): void {
       console.warn(`[QA-AutoJudge] QA 실행 실패(${runOutcome.info.cause}) job=${job.id.slice(0, 8)}: ${runOutcome.info.evidence}`);
       if (runOutcome.alert) addGenieMessage(runOutcome.alert);
     }
+    return;
+  }
+
+  // 보류: 환경 문제로 검증 불가 — 합격·핫픽스 어느 쪽으로도 보내지 않고 아난에게 알린다(2026-09-28).
+  const holdText = [job.fullResult ?? "", ...(job.logs ?? [])].join(String.fromCharCode(10));
+  const hold = detectQaHold(holdText);
+  if (hold.hold) {
+    const title = qaOriginalTitle(job.request);
+    addGenieMessage(`[자동 판정] ⏸ QA 보류 — 환경 문제로 검증하지 못했습니다(합격 처리 안 함, 핫픽스 안 보냄).
+작업: ${title}
+아난이 할 일: ${hold.todo || "보고서 확인"}`);
+    console.log(`[QA-AutoJudge] 보류 job=${job.id.slice(0, 8)}: ${hold.todo}`);
     return;
   }
 
