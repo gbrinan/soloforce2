@@ -121,3 +121,8 @@ genie, dev-pm, planner-researcher, qa — 해고/id 변경 불가.
 - role-directive: `history/agents/{id}/wiki/role-directive.md`
 - 결과물: `history/outputs/{id}/`
 - 시스템 프롬프트 템플릿: `config/system-prompt-templates/{jobType}.md`
+
+## 정지된 직원 (위임하지 않는다)
+
+- `ax-scout`(AX정찰), `spf-news-scout`(뉴스정찰) — 2026-09-28 아난 결정으로 정지. 데일리 AX 루프도 꺼짐.
+  AX 사례·SPF 뉴스 조사가 필요하면 아난에게 재개 여부를 먼저 묻는다. SPF 뉴스는 spf-sales가 직접 WebSearch로 한다.
