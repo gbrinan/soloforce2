@@ -75,6 +75,20 @@ export function externalSendSuspected(agentId: string | undefined, request: stri
   return OUTBOUND_RE.test(request || "");
 }
 
+/**
+ * 점검용 핑(하네스·헬스 체크) 요청인가. 이런 잡은 검증할 산출물이 없어 QA가 붙으면 비용만 들고
+ * "보고 형식 누락"으로 기록된다(2026-09-15 3건). 짧은 요청 + 명시적 핑 표현일 때만 참 — 실제 작업 오탐 방지.
+ */
+export function isHealthPing(request: string): boolean {
+  const r = (request || "").trim();
+  if (r.length > 400) return false;
+  if (/^[A-Z][A-Z0-9_]*_READY$/.test(r)) return true;
+  // 핑의 공통 형태: "도구 호출·파일 읽기를 하지 말고" + "X 한 단어만 반환" (9/15 하네스·Opus·재시작 게이트 핑 전부 이 형태)
+  const noTools = /(도구 호출|파일 읽기|외부 조회)[^.\n]{0,30}(하지 마|하지 말|일절)/.test(r);
+  const oneWord = /한 단어만\s*(반환|답)/.test(r);
+  return noTools && oneWord;
+}
+
 export function decideQa(input: QaDecisionInput): QaDecision {
   // 0. 옵트아웃 — 새 조건보다 «항상» 세다.
   if (input.qaTriggered) return { run: false, reason: "qa-recursion-guard", isSample: false };
@@ -84,6 +98,9 @@ export function decideQa(input: QaDecisionInput): QaDecision {
   }
   // 1. 명시 요청 — 최우선 발동.
   if (input.forceQa === true) return { run: true, reason: "forceQa(호출자 명시)", isSample: false };
+
+  // 1-1. 점검용 핑 — 검증할 산출물이 없다. 코드 변경 판정보다 먼저 본다(판정 불가 null로 QA가 붙던 경로 차단).
+  if (isHealthPing(input.request)) return { run: false, reason: "health-ping(점검용 핑)", isSample: false };
 
   // 2. 코드 변경 — 여기가 결함이 나오는 곳. 줄이지 않는다.
   //    판정 불가(null)면 안전측으로 «수행».
