@@ -31,6 +31,12 @@ export const INTERNAL_SOURCE_TIERS: Record<string, ModelTier> = {
   "loop:runner": "standard",
   "scheduler:trigger": "standard",
   "task:report": "standard",
+  // 2026-09-24 실측: 아래 3종이 표에 없어 기본 모델(opus)로 새며 genie 비용의 73%를 차지했다
+  // (3일 $18.44 / 전체 $25.41, 사장님 직접 대화는 $0.83). 모두 지니가 스스로 시작하는 정형 발화라
+  // 후속 판단은 필요하되 프론티어까지는 불필요 — standard 로 고정한다.
+  "chat:auto-continuation": "standard",
+  "owner-away:returned": "standard",
+  "todo-monitor:backlog": "standard",
 };
 
 /** source 의 고정 티어. 표에 없으면 undefined(기본 모델 유지). */
