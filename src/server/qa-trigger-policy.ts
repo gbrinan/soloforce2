@@ -145,3 +145,18 @@ export function newCodeChanges(baseline: string[] | undefined, current: string[]
   const seen = new Set(baseline ?? []);
   return current.filter((p) => !seen.has(p));
 }
+
+// ── QA 모델 티어 (2026-09-28 아난 결정: 간단한 검증은 terra, 위험한 검증은 sol) ──
+export const QA_MODEL_HEAVY = "gpt-5.6-sol";
+export const QA_MODEL_LIGHT = "gpt-5.6-terra";
+
+/**
+ * QA 잡에 쓸 codex 모델을 고른다. QA가 codex-cli일 때만 값을 돌려주고, 그 밖엔 undefined(에이전트 기본 모델 유지).
+ * 코드 변경(판정 불가 포함)·외부 발신 의심·명시 요청·code/data 유형 → heavy, 나머지(루프 표본의 문서·일반 검증) → light.
+ */
+export function pickQaModel(input: { adapter?: string; reason: string; profile?: string }): string | undefined {
+  if (input.adapter !== "codex-cli") return undefined;
+  const heavyReason = /^(code-change|external-send|forceQa)/.test(input.reason);
+  const heavyProfile = input.profile === "code" || input.profile === "data";
+  return heavyReason || heavyProfile ? QA_MODEL_HEAVY : QA_MODEL_LIGHT;
+}

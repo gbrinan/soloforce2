@@ -62,7 +62,7 @@ import { isSelectiveRecallEnabled, getRecallBudgetChars, buildWikiIndex, buildTo
 import { recordJobMetric } from "./metrics.js";
 import { resolveTier, escalateTier } from "./model-tiers.js";
 import { planStageModel } from "./worker-stage-model.js";
-import { decideQa, newCodeChanges } from "./qa-trigger-policy.js";
+import { decideQa, newCodeChanges, pickQaModel } from "./qa-trigger-policy.js";
 import { selectQaReview, qaVerificationInstructions } from "./qa-review-plan.js";
 import { resolveEffort, normalizeEffort } from "./effort-policy.js";
 import { buildCostEntry } from "./cost-entry.js";
@@ -3360,6 +3360,12 @@ TODO 태그 사용 금지.`;
         origTodoId,       // todoId: 원본과 같은 Todo에 연결 (Task 게이지 표시용)
       );
       qaJob.qaTriggered = true;
+      // QA 모델 티어: codex QA면 위험도에 따라 sol/terra (2026-09-28). 다른 실행기면 기본 모델 유지.
+      {
+        const qaModel = pickQaModel({ adapter: getWorkerAgent("qa")?.adapter, reason: qaDecision.reason, profile: review.profile });
+        if (qaModel) (qaJob as Job & { model?: string }).model = qaModel;
+        console.log(`[AutoQA] QA 모델: ${qaModel ?? "기본"} (사유 ${qaDecision.reason} · 유형 ${review.profile})`);
+      }
       saveJobs();
       console.log(`[AutoQA] 워커 완료 → 우즈(qa) 자동 위임: jobId=${qaJob.id.slice(0, 8)} (after=${job.id.slice(0, 8)}, agent=${job.agent})`);
       } catch (err) {
