@@ -11,6 +11,7 @@
 import { randomInt } from "node:crypto";
 import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import { HISTORY_DIR } from "../config.js";
 
 // ============================================================
@@ -30,6 +31,14 @@ const POLL_TIMEOUT_SEC = 50; // long poll timeout
 const BACKOFF_MIN_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
 const CONFLICT_RETRY_MS = 60_000; // 409 conflict(다른 poller 존재) 시 대기
+
+// 롱폴 전용 HTTPS agent — keep-alive 미사용.
+// 전역 fetch(undici)의 keep-alive 소켓 풀은 50초 롱폴이 끝나 서버가 닫은 소켓을
+// 풀에 남겨두고, 다음 폴이 그 반쯤 죽은 소켓을 재사용하다 "fetch failed"로 실패한다.
+// app-registry.ts의 probeAgent와 같은 처방 — 응답 소비 후 소켓을 즉시 닫는다.
+const pollAgent = new HttpsAgent({ keepAlive: false, maxSockets: 2 });
+// 롱폴 자체가 50초를 기다리므로 소켓 타임아웃은 그보다 넉넉해야 한다.
+const POLL_REQUEST_TIMEOUT_MS = (POLL_TIMEOUT_SEC + 15) * 1000;
 
 const TELEGRAM_MSG_LIMIT = 4096; // 텔레그램 sendMessage 하드 리밋
 const SEND_CHUNK_LIMIT = TELEGRAM_MSG_LIMIT - 96; // 여유 마진 두고 분할 (= 4000)
@@ -1170,27 +1179,74 @@ let pollingActive = false;
 let pollAbortController: AbortController | null = null;
 let currentOffset = 0;
 
+// getUpdates 전용 POST — 전역 fetch 대신 keep-alive 없는 agent를 쓴다.
+// 실패 시 err.code(ECONNRESET 등)가 그대로 올라와 로그에 원인이 남는다.
+function pollRequest(
+  url: string,
+  payload: unknown,
+  signal: AbortSignal,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const body = Buffer.from(JSON.stringify(payload), "utf8");
+    const req = httpsRequest(
+      url,
+      {
+        method: "POST",
+        agent: pollAgent,
+        timeout: POLL_REQUEST_TIMEOUT_MS,
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(body.length),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") });
+        });
+        res.on("error", reject);
+      },
+    );
+    const onAbort = (): void => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      req.destroy(err);
+    };
+    req.on("timeout", () => {
+      req.destroy(new Error(`getUpdates 응답 없음 (${POLL_REQUEST_TIMEOUT_MS}ms)`));
+    });
+    req.on("error", reject);
+    req.on("close", () => signal.removeEventListener("abort", onAbort));
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    req.end(body);
+  });
+}
+
 async function pollOnce(token: string): Promise<{ conflict: boolean; networkError: boolean }> {
   pollAbortController = new AbortController();
   try {
-    const res = await fetch(`${apiBase(token)}/getUpdates`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const res = await pollRequest(
+      `${apiBase(token)}/getUpdates`,
+      {
         offset: currentOffset,
         timeout: POLL_TIMEOUT_SEC,
         allowed_updates: ["message", "callback_query"],
-      }),
-      signal: pollAbortController.signal,
-    });
+      },
+      pollAbortController.signal,
+    );
     if (res.status === 409) {
       return { conflict: true, networkError: false };
     }
-    if (!res.ok) {
+    if (res.status < 200 || res.status >= 300) {
       console.warn(`[Telegram] getUpdates HTTP ${res.status}`);
       return { conflict: false, networkError: true };
     }
-    const json = (await res.json()) as { ok: boolean; result?: TelegramUpdate[]; description?: string };
+    const json = JSON.parse(res.text) as { ok: boolean; result?: TelegramUpdate[]; description?: string };
     if (!json.ok || !Array.isArray(json.result)) {
       console.warn("[Telegram] getUpdates 응답 이상:", json.description);
       return { conflict: false, networkError: true };
@@ -1224,7 +1280,13 @@ async function pollOnce(token: string): Promise<{ conflict: boolean; networkErro
     if ((err as Error)?.name === "AbortError") {
       return { conflict: false, networkError: false }; // 정지 요청에 의한 abort — 정상 종료 취급
     }
-    console.warn("[Telegram] getUpdates 네트워크 오류:", err instanceof Error ? err.message : err);
+    const code =
+      (err as NodeJS.ErrnoException)?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+    console.warn(
+      "[Telegram] getUpdates 네트워크 오류:",
+      err instanceof Error ? err.message : err,
+      code ? `(code=${code})` : "",
+    );
     return { conflict: false, networkError: true };
   } finally {
     pollAbortController = null;
