@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { AgentAdapter, AdapterOptions, AdapterResult } from "./types.js";
 import type { AgentConfig, AgentResult } from "../types.js";
 import { PROJECT_SELF_DIR, PROJECTS_DIR, MYCREW_HOME, TSX_BIN, TSX_CLI_ARGS } from "../config.js";
+import { resolveAgentMcpServers } from "../server/mcp-registry.js";
 import { computeMemoryDir } from "../mcp/memory-dir.js";
 import { safeKill } from "../server/utils/platform.js";
 import { findLatestCodexSessionModel } from "./codex-session-model.js";
@@ -133,7 +134,27 @@ export function syncBackCodexAuth(jobAuth: string, userAuth: string): "updated" 
   return "updated";
 }
 
-function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome {
+/**
+ * 에이전트에 할당된 MCP 서버(레지스트리 정의)를 codex config.toml 블록으로 렌더한다(순수 함수).
+ * codex exec는 비대화형이라 승인이 필요한 서버는 호출이 자동 취소되므로 allow 모드 서버만 싣고, 도구는 자동 승인한다.
+ * safefs는 별도 블록이 있으므로 제외한다. (2026-09-28 — codex QA가 playwright·notion을 못 쓰던 문제)
+ */
+export function renderCodexMcpServers(
+  servers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>,
+  allowNames: string[],
+): string {
+  const out: string[] = [];
+  for (const [name, def] of Object.entries(servers)) {
+    if (name === "safefs" || !allowNames.includes(name)) continue;
+    const key = JSON.stringify(name);
+    out.push(`[mcp_servers.${key}]`, `command = ${JSON.stringify(def.command)}`, `args = ${JSON.stringify(def.args ?? [])}`, `default_tools_approval_mode = "approve"`, ``);
+    const env = Object.entries(def.env ?? {}).filter(([, v]) => v !== "");
+    if (env.length) out.push(`[mcp_servers.${key}.env]`, ...env.map(([k, v]) => `${k} = ${JSON.stringify(String(v))}`), ``);
+  }
+  return out.join("\n");
+}
+
+function makeIsolatedCodexHome(safefsEnv: Record<string, string>, agentMcpServers?: string[]): IsolatedHome {
   if (!existsSync(USER_AUTH)) {
     throw new Error(
       "Codex CLI 인증 필요. 터미널에서 `codex login` 실행 부탁드립니다. " +
@@ -183,7 +204,15 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
     envLines,
     ``,
   ].join("\n");
-  writeFileSync(join(home, "config.toml"), toml, "utf-8");
+  // 에이전트에 할당된 MCP 서버(allow 모드)도 싣는다. approval 모드는 비대화형에서 승인 불가라 제외하고 기록만 남긴다.
+  let fullToml = toml;
+  if (agentMcpServers?.length) {
+    const r = resolveAgentMcpServers(agentMcpServers);
+    fullToml = toml + "\n" + renderCodexMcpServers(r.servers, r.allowNames);
+    if (r.approvalNames.length) console.log(`[codex] approval 모드 MCP는 codex에 싣지 않음: ${r.approvalNames.join(", ")}`);
+  }
+  writeFileSync(join(home, "config.toml"), fullToml, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(join(home, "config.toml"), 0o600); } catch { /* */ }
   // [디버그 2026-07-18] 마지막 생성 설정 사본 (문제 진단용 — 안정화 후 제거 가능)
   try { writeFileSync(join(MYCREW_HOME, "history", ".codex-homes", "last-config.toml"), toml, "utf-8"); } catch { /* */ }
   return {
@@ -347,7 +376,7 @@ export const codexCliAdapter: AgentAdapter = {
 
     let isolated: IsolatedHome;
     try {
-      isolated = makeIsolatedCodexHome(safefsEnv);
+      isolated = makeIsolatedCodexHome(safefsEnv, config.mcpServers);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
