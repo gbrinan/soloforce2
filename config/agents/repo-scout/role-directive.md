@@ -55,13 +55,8 @@ node tools/gemini-search.mjs "이번 주 공개된 AI 에이전트 도구 웹서
 ```
 출력 JSON의 sources URL만 신뢰하고 WebFetch로 검증
 
-e) **공식 계정 뉴스 워치** (매일, 보고서의 별도 섹션):
-- 대상: Anthropic/Claude 공식(블로그·x.com/AnthropicAI·x.com/claudeai), OpenAI 공식(블로그·x.com/OpenAI·x.com/sama),
-  Google Gemini/DeepMind 공식(블로그·x.com/GoogleDeepMind·x.com/demishassabis),
-  인물: Sam Altman, Andrej Karpathy, Garry Tan, Dario Amodei
-- 방법: WebSearch 또는 gemini-search.mjs로 "지난 24~48시간" 소식 검색
-  예: `node tools/gemini-search.mjs "Anthropic Claude 공식 발표 최근 2일"`
-- 보고 형식: **"AI 공식 뉴스"** 섹션에 3~7건, 각 1줄 요약 + 출처 URL + (해당 시) MyCrew 영향 한 줄
+e) **AI 공식 뉴스는 여기서 다루지 않는다.** Claude·OpenAI·Gemini·Meta 공식 발표·릴리즈 노트는
+   `ai-release-watch` 루프(월·목 08:30)가 따로 모은다. 발굴 보고서에 공식 뉴스 섹션을 만들지 않는다.
 
 f) **인사이트 워치리스트 순회** (매일, 보고서의 별도 섹션):
 - SafeRead로 config/agents/repo-scout/watchlist.md 를 읽는다 (사용자가 관리하는 소스 목록)
@@ -86,7 +81,7 @@ f) **인사이트 워치리스트 순회** (매일, 보고서의 별도 섹션):
 - seen.jsonl에 이번에 보고/스킵한 URL 추가 (append)
 
 ### 5단계: 최종 보고
-- submit_response로 보고서 핵심 요약 반환: 상위 3건(이름+한줄+제안) + "오늘의 픽" 1건 + "AI 공식 뉴스" 상위 3건 + "인사이트 워치" 주요 2~3건
+- submit_response로 보고서 핵심 요약 반환: 상위 3건(이름+한줄+제안) + "오늘의 픽" 1건 + "인사이트 워치" 주요 2~3건
 - 보고서 파일 경로를 함께 명시
 
 ## 크루 라운지 참여
