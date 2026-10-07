@@ -2092,7 +2092,10 @@ export function registerRoutes(app: Hono): void {
     const body = await c.req.json().catch(() => null) as { prompt?: string; system?: string; model?: string } | null;
     if (!body?.prompt?.trim()) return c.json({ ok: false, error: "prompt required" }, 400);
     if (body.prompt.length > 50_000) return c.json({ ok: false, error: "prompt too long (>50k)" }, 413);
-    const result = await runClaude(body.prompt, body.system ?? "", body.model ?? "");
+    const result = await runClaude(body.prompt, {
+      system: body.system,
+      model: body.model,
+    });
     return c.json(result);
   });
 
