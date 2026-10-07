@@ -14,23 +14,34 @@ import type { AgentCost } from "../types.js";
 
 export type CostMethod = "cli" | "session-delta" | "tokens";
 
-/** $ / 1M tokens. cost-extractor.ts 의 표와 같은 값(표준 티어). */
+/**
+ * $ / 1M tokens. 이 리포의 단가 정본 — 다른 모듈은 priceForModel 로 가져다 쓴다.
+ * cacheWrite 는 1시간 TTL 단가(입력 단가 2배). claude CLI 세션의 캐시 생성은 1시간 TTL로 과금된다:
+ * 2026-10-07 라이브 원장 cli 행(비재개) 대조에서 1시간 가정은 추정/CLI 중앙값 1.000,
+ * 5분 가정(1.25배)은 0.66~0.68 이었다 (scripts/cost-price-calibration-test.ts).
+ */
 export interface TokenPrice { input: number; output: number; cacheWrite: number; cacheRead: number }
 
-const PRICE_OPUS: TokenPrice = { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 };
-const PRICE_SONNET: TokenPrice = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 };
-const PRICE_HAIKU: TokenPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 };
+const PRICE_FABLE: TokenPrice = { input: 10, output: 50, cacheWrite: 20, cacheRead: 0.25 };
+const PRICE_OPUS_5_5: TokenPrice = { input: 4, output: 20, cacheWrite: 8, cacheRead: 0.2 };
+const PRICE_OPUS: TokenPrice = { input: 5, output: 25, cacheWrite: 10, cacheRead: 0.5 };
+const PRICE_SONNET_4: TokenPrice = { input: 3, output: 15, cacheWrite: 6, cacheRead: 0.3 };
+const PRICE_SONNET: TokenPrice = { input: 2, output: 10, cacheWrite: 4, cacheRead: 0.2 };
+const PRICE_HAIKU: TokenPrice = { input: 1, output: 5, cacheWrite: 2, cacheRead: 0.1 };
 
 /**
- * 모델명 → 단가. 정확한 ID 표 대신 «계열» 부분일치로 판정한다 —
+ * 모델명 → 단가. 세대 차이가 있는 ID 접두사를 먼저 보고, 없으면 «계열» 부분일치로 판정한다 —
  * 신모델이 나올 때마다 표 누락으로 폴백 단가가 새는 사고(2026-07-17)를 막기 위해서다.
- * 모르는 계열은 가장 비싼 opus 단가(과소계상보다 과대계상이 안전).
+ * 모르는 계열은 가장 비싼 단가(과소계상보다 과대계상이 안전).
  */
 export function priceForModel(model: string | undefined | null): TokenPrice {
   const m = (model ?? "").toLowerCase();
+  if (m.includes("opus-5-5")) return PRICE_OPUS_5_5;
+  if (m.includes("sonnet-4")) return PRICE_SONNET_4;
   if (m.includes("haiku")) return PRICE_HAIKU;
   if (m.includes("sonnet")) return PRICE_SONNET;
-  return PRICE_OPUS;
+  if (m.includes("opus")) return PRICE_OPUS;
+  return PRICE_FABLE;
 }
 
 export interface UsageTokens {

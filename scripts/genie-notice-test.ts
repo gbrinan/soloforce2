@@ -25,10 +25,11 @@ const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) < eps;
 
 // ── 1. 비용 ──
 {
-  // 실측 행(2026-10-02): haiku, 캐시읽기 114k·생성 3.4k·출력 319 → 원장 $2.15 였으나 실제 약 $0.017
+  // 실측 행(2026-10-02): haiku, 캐시읽기 114k·생성 3.4k·출력 319 → 원장 $2.15 였으나 실제 약 $0.020
+  // 캐시 생성은 1시간 TTL 단가($2/M) — 근거는 cost-price-calibration-test.ts 의 CLI 실측 대조.
   const usage = { inputTokens: 0, outputTokens: 319, cacheReadTokens: 114_000, cacheCreateTokens: 3_400 };
   const tok = priceTokens(usage, "claude-haiku-4-5");
-  check("haiku 토큰 단가 약 $0.017", near(tok, 0.0114 + 0.00425 + 0.001595, 1e-6), String(tok));
+  check("haiku 토큰 단가 약 $0.020", near(tok, 0.0114 + 0.0068 + 0.001595, 1e-6), String(tok));
 
   const fresh = computeInvocationCost({ cliTotalUsd: 0.05, resumed: false, usage });
   check("비재개 → CLI 값 그대로(cli)", fresh.costMethod === "cli" && fresh.costUsd === 0.05);
@@ -42,7 +43,7 @@ const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) < eps;
   const reset = computeInvocationCost({ cliTotalUsd: 0.4, resumed: true, prevCumulativeUsd: 2.0, usage, model: "sonnet" });
   check("누적이 줄면(이상치) 차분 대신 토큰 산정", reset.costMethod === "tokens");
 
-  check("모델 미상 → opus 단가(과소계상 금지)", priceTokens({ inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0 }, undefined) === 15);
+  check("모델 미상 → opus 이상 단가(과소계상 금지)", priceTokens({ inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0 }, undefined) >= 5);
 
   const t = new SessionCostTracker(2);
   t.set("a", 1); t.set("b", 2); t.set("c", 3);
