@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync, chmodSync, readFileSync, renameSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync, chmodSync, readFileSync, renameSync, statSync } from "node:fs";
+import fg from "fast-glob";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentAdapter, AdapterOptions, AdapterResult } from "./types.js";
@@ -83,6 +84,33 @@ export function resolveCodexWritePath(p: string): string {
 }
 
 /**
+ * codex 샌드박스 writable_roots / --add-dir 로 넘길 디렉터리 목록.
+ * codex는 루트마다 그 안에 보호용 .codex 를 만들어 보므로, 파일·미존재 경로·미전개 glob이 섞이면
+ * "failed to inspect synthetic bubblewrap mount target <root>/.codex: Not a directory"로 샌드박스 전체가 실패한다(2026-09-28).
+ * - glob(*)은 실제 디렉터리로 전개한다.
+ * - history/* 디렉터리는 없으면 만든다(데이터 루트 안). 코드 쪽 미존재 경로는 만들지 않고 뺀다.
+ * - 파일 경로는 뺀다 — 단일 파일 쓰기는 SafeFS(SafeWrite)가 writePaths로 따로 통제한다.
+ */
+export function codexWritableRoots(writePaths: string[]): string[] {
+  const out: string[] = [];
+  const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
+  for (const w of writePaths) {
+    const abs = resolveCodexWritePath(w);
+    if (abs.includes("*")) {
+      for (const m of fg.sync(abs.replace(/\/+$/, ""), { onlyDirectories: true, absolute: true, dot: true })) out.push(m);
+      continue;
+    }
+    if (isDir(abs)) { out.push(abs); continue; }
+    if (existsSync(abs)) continue; // 파일
+    const cleaned = w.replace(/^\//, "");
+    if (cleaned.startsWith("history/") && /\*\*$|\/$/.test(w)) {
+      try { mkdirSync(abs, { recursive: true }); out.push(abs); } catch { /* 만들 수 없으면 뺀다 */ }
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
  * 잡 중에 codex가 갱신한 인증(auth.json 사본)을 원본에 되돌려 쓴다.
  * 사본만 갱신되고 삭제되면 원본의 refresh token이 "already used"로 무효가 된다(2026-09-19~26 QA 23건 실패 원인).
  * 사본이 깨졌거나 토큰이 없으면 원본을 건드리지 않는다.
@@ -142,13 +170,7 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
     `sandbox_mode = "workspace-write"`,
     ``,
     `[sandbox_workspace_write]`,
-    `writable_roots = [${(safefsEnv.MCP_WRITE_PATHS || "")
-      .split(",")
-      .filter(Boolean)
-      .map((w) => {
-        return JSON.stringify(resolveCodexWritePath(w));
-      })
-      .join(", ")}]`,
+    `writable_roots = [${codexWritableRoots((safefsEnv.MCP_WRITE_PATHS || "").split(",").filter(Boolean)).map((r) => JSON.stringify(r)).join(", ")}]`,
     ``,
     `[mcp_servers.safefs]`,
     `command = ${JSON.stringify(TSX_BIN)}`,
@@ -341,8 +363,7 @@ export const codexCliAdapter: AgentAdapter = {
       "--skip-git-repo-check",
     ];
     if (config.writePaths) {
-      for (const p of config.writePaths) {
-        const abs = p.startsWith("/") ? resolveCodexWritePath(p) : p;
+      for (const abs of codexWritableRoots(config.writePaths.filter((p) => p.startsWith("/")))) {
         args.push("--add-dir", abs);
       }
     }
