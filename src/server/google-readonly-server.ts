@@ -63,7 +63,8 @@ type ServerRouteOptions = {
 type CredentialResolverOptions = {
   readonly resolveRemoteAddress: (context: Context) => string | undefined;
   readonly registry: GoogleConnectionRegistry;
-  readonly trustedOrigin: string;
+  readonly trustedOrigins: readonly string[];
+  readonly allowedTailscaleLogins: readonly string[];
   readonly localOwnerAllowed: boolean;
   readonly now: () => string;
 };
@@ -113,7 +114,11 @@ export function createGoogleReadonlyServerRoutes(options: ServerRouteOptions = p
   const credentialResolverOptions: CredentialResolverOptions = {
     resolveRemoteAddress: options.resolveRemoteAddress ?? ((context) => { try { return getConnInfo(context).remote.address; } catch { return undefined; } }),
     registry,
-    trustedOrigin: callback.origin,
+    trustedOrigins: buildTrustedOrigins(callback.origin, options.env.SOLOFORCE_TAILSCALE_ORIGIN),
+    allowedTailscaleLogins: (options.env.SOLOFORCE_TAILSCALE_ALLOWED_LOGINS ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
     localOwnerAllowed: callback.hostname === "localhost" || callback.hostname === "127.0.0.1",
     now,
   };
@@ -154,6 +159,33 @@ function resolveProjectRoot(projectsDirectory: string, projectId: string): strin
     : null;
 }
 
+// tailnet 경유 접속 허용 — 소유자 인증이 콜백 URL(localhost)의 origin 하나로만 판정돼
+// Tailscale 호스트명으로 들어온 요청이 전부 거부되던 문제(맥북·폰에서 구글 연동 불가)를 푼다.
+// SOLOFORCE_TAILSCALE_ORIGIN에 적힌 주소를 신뢰 목록에 추가하며, 프록시가 http로 전달하는
+// 경우까지 커버하려고 http/https 양쪽 형태를 모두 등록한다.
+function buildTrustedOrigins(callbackOrigin: string, tailscaleOrigin: string | undefined): string[] {
+  const origins = new Set<string>([callbackOrigin]);
+  if (tailscaleOrigin) {
+    try {
+      const url = new URL(tailscaleOrigin);
+      origins.add(url.origin);
+      origins.add(`http://${url.host}`);
+      origins.add(`https://${url.host}`);
+    } catch {
+      // 형식이 잘못된 값은 무시 — 기존 localhost 경로는 그대로 동작한다.
+    }
+  }
+  return [...origins];
+}
+
+// Tailscale serve가 신원 헤더를 붙여 보내면 허용 로그인 목록과 대조한다.
+// 헤더가 없으면(구버전 serve 등) tailnet 도달 자체를 신뢰한다 — tailnet은 본인 기기만 들어온다는 전제.
+function tailscaleIdentityAllowed(context: Context, allowedLogins: readonly string[]): boolean {
+  const login = context.req.header("Tailscale-User-Login");
+  if (!login) return true;
+  return allowedLogins.length === 0 || allowedLogins.includes(login);
+}
+
 function resolveCredential(
   context: Context,
   options: CredentialResolverOptions,
@@ -163,10 +195,13 @@ function resolveCredential(
       ? { kind: "oauth_transaction", state: "active", provider: "google-drive" }
       : { kind: "invalid" };
   }
-  const csrfValid = context.req.header("Origin") === options.trustedOrigin;
+  const origin = context.req.header("Origin");
+  const csrfValid = origin !== undefined && options.trustedOrigins.includes(origin);
   if (context.req.header('Sec-Fetch-Site') === 'cross-site') return { kind: 'none' };
   if (!isSsoEnabled()) {
-    return options.localOwnerAllowed && new URL(context.req.url).origin === options.trustedOrigin
+    return options.localOwnerAllowed
+      && options.trustedOrigins.includes(new URL(context.req.url).origin)
+      && tailscaleIdentityAllowed(context, options.allowedTailscaleLogins)
       && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(options.resolveRemoteAddress(context) ?? '')
       ? { kind: "owner", csrfValid, recentAuth: true }
       : { kind: "none" };

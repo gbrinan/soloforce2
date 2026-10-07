@@ -24,7 +24,7 @@
     "test:loop-runner-status": "tsx scripts/loop-runner-status-test.ts",
     "test:connected-ingest-auth": "tsx scripts/connected-ingest-auth-test.ts",
     "test:reversible-ingest": "tsx scripts/reversible-ingest-test.ts",
-    "test:google-readonly-connection": "tsx scripts/google-readonly-connection-test.ts && tsx scripts/google-readonly-routes-test.ts && tsx scripts/google-readonly-server-mount-test.ts && tsx scripts/google-readonly-real-server-mount-test.ts",
+    "test:google-readonly-connection": "tsx scripts/google-readonly-connection-test.ts && tsx scripts/google-readonly-routes-test.ts && tsx scripts/google-readonly-server-mount-test.ts && tsx scripts/google-readonly-real-server-mount-test.ts && tsx scripts/google-readonly-tailnet-origin-test.ts",
     "test:memory-graph": "tsx scripts/memory-graph-test.ts",
     "mock:external": "tsx scripts/external-mock.ts",
     "start:b": "cross-env MYCREW_HOME=./.mycrew-B PORT=3459 tsx src/index.ts",
