@@ -427,6 +427,7 @@ export default function AppHostFrame({ manifest, onReturn, onChatOpenRequest, on
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, position: "relative" }}>
       <div style={{
         display: "flex", alignItems: "center", gap: 8, padding: "6px 12px",
+        flexWrap: manifest.id === 'projects' ? 'wrap' : 'nowrap',
         borderBottom: "1px solid var(--mantine-color-default-border)",
         background: "var(--mantine-color-body)",
       }}>
@@ -446,6 +447,11 @@ export default function AppHostFrame({ manifest, onReturn, onChatOpenRequest, on
           }}
         />
         <div style={{ flex: 1 }} />
+        {manifest.id === 'projects' && (
+          <Button component="a" href="/project-drive" size="compact-xs" variant="light" title="Google Drive 프로젝트 업로드·가져오기" style={{ flexShrink: 0 }}>
+            Drive 전송
+          </Button>
+        )}
         {appStatus?.label && (
           <Badge
             color={appStatus.status === "online" ? "teal" : appStatus.status === "offline" ? "red" : "gray"}

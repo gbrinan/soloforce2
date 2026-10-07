@@ -62,7 +62,10 @@ const state = { category: "", search: "", projects: [], selected: null, detail: 
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
 
 async function api(path) {
-  const r = await fetch(path);
+  const endpoint = location.pathname.startsWith('/api/apps/projects/proxy')
+    ? path.replace(/^\/api\/projects(?=[/?]|$)/, '/api/projects-query')
+    : path;
+  const r = await fetch(endpoint);
   if (!r.ok) return null;
   return r.json();
 }

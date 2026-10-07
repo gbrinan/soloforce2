@@ -42,7 +42,8 @@
     "preview:wiki": "node --import tsx scripts/wiki-preview.ts",
     "test:wiki-live": "node --import tsx scripts/wiki-live-test.ts",
     "release:source": "node scripts/release-source.mjs",
-    "test:wiki-collaboration": "node --import tsx scripts/wiki-collaboration-test.ts"
+    "test:wiki-collaboration": "node --import tsx scripts/wiki-collaboration-test.ts",
+    "test:project-drive": "node --import tsx scripts/project-drive-test.ts && node --import tsx scripts/project-drive-http-test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

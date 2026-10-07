@@ -25,6 +25,7 @@ import { ReversibleIngestStore } from "./reversible-ingest.js";
 import { CorpusError } from './corpus/extract.js';
 
 type ServiceOptions = {
+  readonly requiredScopes?: readonly string[];
   readonly projectRoot: string;
   readonly projectId: string;
   readonly registry: GoogleConnectionRegistry;
@@ -59,6 +60,7 @@ export class GoogleReadonlyConnectionService {
   readonly #store: ReversibleIngestStore;
   readonly #now: () => string;
   readonly #transactionTtlMs: number;
+  readonly #requiredScopes: readonly string[];
 
   constructor(options: ServiceOptions) {
     this.#projectId = ProjectIdSchema.parse(options.projectId);
@@ -67,6 +69,7 @@ export class GoogleReadonlyConnectionService {
     this.#provider = options.provider;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#transactionTtlMs = options.transactionTtlMs ?? 10 * 60 * 1000;
+    this.#requiredScopes = options.requiredScopes ?? GOOGLE_READONLY_SCOPES;
     this.#store = new ReversibleIngestStore({
       projectRoot: options.projectRoot,
       projectId: this.#projectId,
@@ -107,7 +110,7 @@ export class GoogleReadonlyConnectionService {
         code: input.code,
         codeVerifier: consumed.transaction.codeVerifier,
       });
-      const hasRequiredScopes = GOOGLE_READONLY_SCOPES.every((scope) => tokens.grantedScopes.includes(scope));
+      const hasRequiredScopes = this.#requiredScopes.every((scope) => tokens.grantedScopes.includes(scope));
       if (!hasRequiredScopes) return { kind: "denied", reason: "required_scope_missing" };
       if (tokens.refreshToken === null) return { kind: "denied", reason: "offline_access_missing" };
       const identity = await this.#provider.fetchIdentity(tokens.accessToken);
