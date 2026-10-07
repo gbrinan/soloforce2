@@ -8,6 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { request as httpRequest, Agent as HttpAgent } from "node:http";
 import { getGatewayToken } from "./ai-gateway.js";
 
+import { withoutAnthropicKeys } from "./utils/safeChildEnv.js";
 // 스토어 설치 온보딩 — 앱별 인프라 세팅 안내. 매니페스트 선택 필드로, 없으면 온보딩 UI 미표시.
 // 소비처: (1) 스토어 설치 완료 다이얼로그(scripts/gen-store-aifeatures.mjs가 스토어에 bake),
 //        (2) 마이크루 최초 실행 온보딩 모달(/api/apps/manifest 경유, src/client/components/AppSetupGuideModal.tsx).
@@ -697,7 +698,7 @@ function hasLaunchAgent(id: string): boolean {
 async function rebuildAndRestartApp(id: string, appDir: string, port: number): Promise<void> {
   const b = spawnSync("npm", ["run", "build"], {
     cwd: appDir,
-    env: { ...process.env, ...readDotEnvLocal(appDir), PATH: SPAWN_PATH },
+    env: withoutAnthropicKeys({ ...process.env, ...readDotEnvLocal(appDir), PATH: SPAWN_PATH }),
     timeout: 180_000,
     stdio: "ignore",
   });
@@ -804,7 +805,7 @@ async function warmOneApp(id: string, manifest: AppManifest, opts: { force?: boo
     console.log(`[app-registry] pre-warm ${id}: 소스가 빌드보다 최신 → 재빌드 후 기동`);
     const b = spawnSync("npm", ["run", "build"], {
       cwd: appDir,
-      env: { ...process.env, ...readDotEnvLocal(appDir), PATH: SPAWN_PATH },
+      env: withoutAnthropicKeys({ ...process.env, ...readDotEnvLocal(appDir), PATH: SPAWN_PATH }),
       timeout: 180_000,
       stdio: "ignore",
     });

@@ -34,6 +34,7 @@ import { resolveTier } from "./model-tiers.js";
 import { modelForInternalSource } from "./internal-source-tier.js";
 import { resolveGenieSource } from "./cost-entry.js";
 
+import { withoutAnthropicKeys } from "./utils/safeChildEnv.js";
 // 침묵 catch 관측 훅 — 예상된 부재(ENOENT)는 무시, 그 외는 warn.
 // (플랫폼 분석 2026-07-04 P0: 빈 catch 26곳이 대화 유실을 은폐하던 문제)
 function swallow(context: string, err: unknown): void {
@@ -523,7 +524,7 @@ async function spawnDryRunTestServer(port: number, logFile: string): Promise<num
     cwd: PROJECT_SELF_DIR,
     detached: true,
     stdio: ["ignore", out, err],
-    env: { ...process.env, PORT: String(port), DRY_RUN: "1" },
+    env: withoutAnthropicKeys({ ...process.env, PORT: String(port), DRY_RUN: "1" }),
   });
   child.unref();
   return child.pid ?? -1;

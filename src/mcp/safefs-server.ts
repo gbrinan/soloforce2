@@ -17,6 +17,7 @@ import { dirname, basename, join, resolve as pathResolve } from "node:path";
 import { homedir } from "node:os";
 import { configurePathMatcher, matchesAllowList } from "./path-matcher.js";
 import { SENSITIVE_PATHS } from "./sensitive-paths.js";
+import { withoutAnthropicKeys } from "../server/utils/safeChildEnv.js";
 // SENSITIVE_PATHS — 코드 고정 deny-list. 직원 env(MCP_*_SENSITIVE) 누락/오주입에도 무조건 차단.
 
 const WRITE_PATHS = (process.env.MCP_WRITE_PATHS || "")
@@ -675,7 +676,7 @@ if (BASH_ENABLED) {
           timeout: timeout ?? 120_000,
           maxBuffer: 10 * 1024 * 1024,
           encoding: "utf-8",
-          env: { ...process.env, PATH: process.env.PATH },
+          env: withoutAnthropicKeys({ ...process.env, PATH: process.env.PATH }),
         });
         return {
           content: [{

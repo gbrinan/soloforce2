@@ -68,6 +68,7 @@ import { resolveEffort, normalizeEffort } from "./effort-policy.js";
 import { buildCostEntry } from "./cost-entry.js";
 import type { ModelTier } from "./loops/types.js";
 
+import { withoutAnthropicKeys } from "./utils/safeChildEnv.js";
 const folderName = basename(PROJECT_SELF_DIR);
 const SELF_NAMES = new Set(["self", folderName, folderName.toLowerCase()]);
 
@@ -1274,7 +1275,7 @@ async function execBash(cmd: string, cwd?: string, timeoutMs = 60000): Promise<s
       // CLAUDE_BIN_DIR이 직전 PATH 항목 꼬리에 붙어버렸고(예: "...\System32:C:\...\bin"),
       // 그 결과 post-validation 명령이 claude 바이너리를 영영 못 찾았다.
       // agent.ts:572·terminal-ws.ts:199·worker-pty.ts:145는 이미 플랫폼 분기를 쓰고 있다.
-      env: { ...process.env, PATH: `${process.env.PATH ?? ""}${process.platform === "win32" ? ";" : ":"}${CLAUDE_BIN_DIR}` },
+      env: withoutAnthropicKeys({ ...process.env, PATH: `${process.env.PATH ?? ""}${process.platform === "win32" ? ";" : ":"}${CLAUDE_BIN_DIR}` }),
     }, (error, stdout, stderr) => {
       if (error) {
         resolve(`[에러] ${stderr || error.message}`);
