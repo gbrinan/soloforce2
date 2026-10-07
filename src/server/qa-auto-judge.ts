@@ -16,6 +16,7 @@ import { PROJECT_SELF_DIR } from "../config.js";
 import { addGenieMessage, isSelfRestartPending } from "./chat.js";
 import { getWorkerAgent } from "../agent-registry.js";
 import { isQaFailVerdict } from "./qa-verdict.js";
+import { recordQaRunOutcome } from "./qa-run-failure.js";
 import type { TrajectoryVerdict } from "./trajectory-judge.js";
 
 export type QaVerdict = "pass" | "fail" | "unknown";
@@ -244,10 +245,26 @@ function handlePassVerdict(job: Job, cycleInfo: CycleInfo | null): void {
   }
 }
 
+/** QA 요청문에서 검증 대상 원작업의 제목 한 줄을 뽑는다(알림용). */
+function qaOriginalTitle(request: string): string {
+  const body = request.split(/##\s*원본 (?:요청|QA 대상)/)[1] ?? request;
+  const line = body.split("\n").map((l) => l.trim())
+    .find((l) => l && !/^\*\*\[루프 정책\]|^\[?(자동 QA|QA 자동)|^<!--|^워커\(|^#/.test(l)) ?? request.split("\n")[0];
+  return line.replace(/\*\*/g, "").slice(0, 80);
+}
+
 export function handleQaJobComplete(job: Job): void {
   if (job.agent !== "qa") return;
-  // completed만 처리 (failed/timeout은 무시 — QA 실행 자체 실패)
-  if (job.status !== "completed") return;
+  // QA 실행 자체 실패도 버리지 않는다 — 원인을 분류하고 연속 실패면 사람에게 알린다.
+  // (2026-09-19~26 codex 인증 실패로 QA 23건이 무알림 실패 → 원작업이 검증 없이 끝난 사고)
+  const runOutcome = recordQaRunOutcome(job.status, job.logs ?? [], qaOriginalTitle(job.request));
+  if (job.status !== "completed") {
+    if (runOutcome) {
+      console.warn(`[QA-AutoJudge] QA 실행 실패(${runOutcome.info.cause}) job=${job.id.slice(0, 8)}: ${runOutcome.info.evidence}`);
+      if (runOutcome.alert) addGenieMessage(runOutcome.alert);
+    }
+    return;
+  }
 
   const verdict = detectQaVerdict(job.logs);
   const cycleInfo = extractCycleInfo(job.request);
