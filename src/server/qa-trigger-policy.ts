@@ -56,6 +56,20 @@ export interface QaDecision {
   isSample: boolean;
 }
 
+/**
+ * 루프 러너가 모든 스텝 요청 앞에 붙이는 정책 문구의 표식.
+ * 이 문구에는 "외부 발신·전송은 … 한해서만" 같은 금지 문장이 들어 있어, 어휘 판정이
+ * «발신을 금지하는 문장»을 «발신 의심»으로 오인했다. 그 결과 9/15~9/26 자동 QA 74회 중
+ * 70회(95%)가 이 오탐으로 발동했다(2026-09-26 실측). 러너 쪽 문구와 표식이 어긋나지 않도록
+ * 회귀 테스트가 runner.ts 소스를 직접 대조한다.
+ */
+export const LOOP_POLICY_MARKER = "[루프 정책]";
+
+/** 루프 러너가 보낸 정기 작업인가. 이런 작업은 루프의 승인 모드·권한 게이트가 발신을 사전에 통제한다. */
+export function isLoopDispatched(request: string): boolean {
+  return (request || "").includes(LOOP_POLICY_MARKER);
+}
+
 export function externalSendSuspected(agentId: string | undefined, request: string): boolean {
   if (agentId && EXTERNAL_SEND_AGENTS.has(agentId)) return true;
   return OUTBOUND_RE.test(request || "");
@@ -81,7 +95,10 @@ export function decideQa(input: QaDecisionInput): QaDecision {
   }
 
   // 3. 코드 변경 0건 — 외부 발신이면 유지.
-  if (externalSendSuspected(input.agentId, input.request)) {
+  //    단 루프 정기 작업은 제외하고 아래 주 1회 표본으로 보낸다(2026-09-26 아난 결정).
+  //    자동 QA는 작업이 «끝난 뒤» 도는 사후 감사라 이미 나간 발신을 막지 못한다 — 루프 발신의
+  //    실제 통제는 실행 전 단계(루프 승인 모드·safefs 권한 게이트)가 맡는다.
+  if (!isLoopDispatched(input.request) && externalSendSuspected(input.agentId, input.request)) {
     return { run: true, reason: "external-send-suspected(되돌릴 수 없음)", isSample: false };
   }
 
