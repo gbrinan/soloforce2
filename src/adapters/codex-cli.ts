@@ -175,6 +175,9 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
     `[mcp_servers.safefs]`,
     `command = ${JSON.stringify(TSX_BIN)}`,
     `args = ${argsJson}`,
+    // [2026-09-28] codex 0.144.5 exec는 approval_policy="never"여도 MCP 도구 호출을 승인 대상으로 보고 자동 취소한다
+    // ("user cancelled MCP tool call"). 허용 목록·승인은 safefs가 자체 수행하므로 이 서버 도구는 codex 단에서 자동 승인.
+    `default_tools_approval_mode = "approve"`,
     ``,
     `[mcp_servers.safefs.env]`,
     envLines,
