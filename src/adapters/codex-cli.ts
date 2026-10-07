@@ -300,7 +300,9 @@ function spawnCodex(
         const usage = event.usage as Record<string, unknown> | undefined;
         if (usage && typeof usage === "object") {
           cost = {
+            // 구독제라 달러를 모른다 — $0을 «무료»로 집계하지 않게 산정 방식을 명시한다(cost-ledger.ts).
             costUsd: 0,
+            costMethod: "unpriced",
             inputTokens: Number(usage.input_tokens ?? 0),
             outputTokens: Number(usage.output_tokens ?? 0),
             cacheReadTokens: Number(usage.cached_input_tokens ?? 0),
