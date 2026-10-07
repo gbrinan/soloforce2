@@ -63,6 +63,7 @@ import { recordJobMetric } from "./metrics.js";
 import { resolveTier, escalateTier } from "./model-tiers.js";
 import { planStageModel } from "./worker-stage-model.js";
 import { decideQa, newCodeChanges } from "./qa-trigger-policy.js";
+import { selectQaReview, qaVerificationInstructions } from "./qa-review-plan.js";
 import { resolveEffort, normalizeEffort } from "./effort-policy.js";
 import { buildCostEntry } from "./cost-entry.js";
 import type { ModelTier } from "./loops/types.js";
@@ -3293,6 +3294,12 @@ TODO 태그 사용 금지.`;
           return; // QA 생성 건너뜀 (IIFE 내부 return — processCallback 전체 흐름은 계속)
         }
         
+        const review = await selectQaReview({
+          request: job.request, report: job.fullResult ?? '', codeChanges: jobScopedCodeChanges,
+        });
+        auditLog('qa.profile_selected', { jobId: job.id, ...review });
+        if (job.status !== 'completed' || job.skipQa || process.env.AUTO_QA_TRIGGER === 'false') return;
+
         // PASS → 기존 QA 흐름 진행
         const origTitle = job.request.split("\n")[0].trim().slice(0, 80);
         const qaReport = (job.fullResult ?? job.logs.slice(-20).join("\n")).slice(0, 12000);
@@ -3324,22 +3331,7 @@ TODO 태그 사용 금지.`;
         `- 위 절대경로 **외의 파일로 판정하지 말 것.** 같은 주제의 구본이 다른 디렉터리에 남아 있을 수 있다.\n` +
         `- 지적하기 전에 그 문자열을 위 파일에 직접 grep해 부재를 확인할 것. 히트하면 그 지적은 이전 회차 대상(stale)이다.\n` +
         `- 지적이 전부 stale이어도 **결론 수치는 따로 검산**할 것 — 총계는 맞고 지목만 틀린 FAIL이 실제로 있었다(2026-08-21).\n\n` +
-        `## ⚠️ 필수 검증 절차 (모두 실제 실행)\n` +
-        `1. **타입 체크**: \`npx tsc --noEmit\` (대상 프로젝트) → 출력 첨부\n` +
-        `2. **린트**: \`npm run lint\` 또는 \`eslint\` (가능 시) → 출력 첨부\n` +
-        `3. **유닛 테스트**: \`npm test\` / \`vitest run\` / \`jest\` (관련 파일에 한해) → 통과율 첨부\n` +
-        `4. **E2E/스모크 테스트**: \`npm run test:e2e\` / \`playwright test\` / dev 서버 + curl 체크 (UI 변경 시 필수) → 결과 첨부\n` +
-        `5. **회귀 체크**: 변경 파일 import 그래프 상 영향 파일 자체 grep + 빌드(\`npm run build\`) 통과 여부\n\n` +
-        `## 판정 규칙 (엄격)\n` +
-        `- ✅ **통과**: 1~5 모두 실행 + 모두 PASS (실행 출력 첨부 필수)\n` +
-        `- ⚠️ **조건부 통과**: 1~5 중 일부 실행 불가 (이유 명시) + 실행분 모두 PASS\n` +
-        `- ❌ **거부**: 단 하나라도 FAIL + 실행 로그 첨부\n` +
-        `- 🚫 **검증 불가 처리**: 환경 미비로 실행 불가 시 "검증 불가 (사유)" 명시 — 분석/팩트체크 단독 판정 금지\n\n` +
-        `## 금지 사항\n` +
-        `- 코드 진단·정책 분석만으로 "통과" 판정 금지\n` +
-        `- 실행 출력 없이 "정상 동작 예상" 추측 판정 금지\n` +
-        `- 변경 라인 직접 읽고 "문제 없음" 단언 금지 (실행 증거 필수)\n\n` +
-        `5단 QA 보고 필수 (검증 항목별 실행 명령·출력·결과 / 발견 문제 / 종합 판정).`;
+        qaVerificationInstructions(review.profile);
       // 원본 Job의 Todo 찾기 — QA Job을 같은 Todo에 연결하여 Task 게이지에 표시
       const origTodos = getTodosByJobId(job.id);
       const origTodoId = origTodos.length > 0 ? origTodos[0].id : undefined;

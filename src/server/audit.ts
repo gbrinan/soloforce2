@@ -12,6 +12,7 @@ import type { Job } from "../types.js";
 import { normalizePageName } from "./pm-memory.js";
 
 export type AuditEvent =
+  | "qa.profile_selected"
   | "job.created"
   | "job.started"
   | "job.completed"
