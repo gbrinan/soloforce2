@@ -36,6 +36,9 @@ import { join, dirname, resolve } from "node:path";
 import { HISTORY_DIR } from "../config.js";
 import { runClaude } from "./claude-cli.js";
 
+const GMAIL_SEARCH_TOOLS = ["mcp__claude_ai_Gmail__search_threads"] as const;
+const GMAIL_THREAD_TOOLS = ["mcp__claude_ai_Gmail__get_thread"] as const;
+
 const FILTERS_FILE = resolve(".", "config", "mail-scan-filters.json");
 const SEEN_FILE = join(HISTORY_DIR, "mail-scan", "seen.json");
 
@@ -468,7 +471,11 @@ export async function runMailScan(): Promise<MailScanResult | null> {
     const cfg = loadFilterConfig();
 
     // 1) 수집 — 판단 없는 메타데이터만
-    const fetched = await runClaude(fetchPrompt(cfg), FETCH_SYSTEM, "", FETCH_TIMEOUT_MS);
+    const fetched = await runClaude(fetchPrompt(cfg), {
+      system: FETCH_SYSTEM,
+      timeoutMs: FETCH_TIMEOUT_MS,
+      allowedTools: GMAIL_SEARCH_TOOLS,
+    });
     if (!fetched.ok) {
       console.warn(`[MailScan] 수집 실패 — ${fetched.error ?? "원인 불명"}`);
       return null;
@@ -514,7 +521,11 @@ export async function runMailScan(): Promise<MailScanResult | null> {
     }
 
     // 3) 분류 — 통과분만 LLM에 태운다
-    const classifiedRaw = await runClaude(classifyPrompt(passed), CLASSIFY_SYSTEM, "", CLASSIFY_TIMEOUT_MS);
+    const classifiedRaw = await runClaude(classifyPrompt(passed), {
+      system: CLASSIFY_SYSTEM,
+      timeoutMs: CLASSIFY_TIMEOUT_MS,
+      allowedTools: GMAIL_THREAD_TOOLS,
+    });
     if (!classifiedRaw.ok) {
       console.warn(`[MailScan] 분류 실패 — ${classifiedRaw.error ?? "원인 불명"}`);
       return null;
