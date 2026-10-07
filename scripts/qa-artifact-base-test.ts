@@ -80,3 +80,5 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log("qa-artifact-base-test: 6건 통과");
+// qa-auto-judge 가 import 시 여는 핸들 때문에 프로세스가 끝나지 않아 npm test 체인이 멈췄다 — 명시 종료.
+process.exit(0);
