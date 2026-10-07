@@ -755,6 +755,7 @@ async function generateDailySummaries(): Promise<void> {
       name: "DailySummary",
       systemPrompt: `당신은 하루 업무 요약 담당입니다. 주어진 위키 페이지들을 50줄 이내의 하루 요약으로 정리하세요. 핵심 결정사항, 작업 결과, 발견된 문제를 중심으로. 불필요한 세부사항은 제거.`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 5,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -809,6 +810,7 @@ async function generateDailySummaries(): Promise<void> {
           name: "DailySummary",
           systemPrompt: `당신은 하루 업무 요약 담당입니다. 주어진 위키 페이지들을 50줄 이내의 하루 요약으로 정리하세요. 핵심 결정사항, 작업 결과, 발견된 문제를 중심으로.`,
           allowedTools: [] as string[],
+          textOnly: true,
           maxTurns: 5,
           model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
         };

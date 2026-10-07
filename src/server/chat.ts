@@ -875,6 +875,7 @@ async function flushSessionMemory(): Promise<void> {
 저장할 것: 결정사항, 작업 결과, 사용자 요청, 프로젝트 상태
 저장하지 않을 것: 인사, 이미 저장된 정보, 일상 대화`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 1,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -961,6 +962,7 @@ async function generateDailySummaries(): Promise<void> {
         name: "Summarizer",
         systemPrompt: "주어진 대화 기록을 핵심 내용만 간결하게 요약하세요. 마크다운 형식으로 5-10줄 이내.",
         allowedTools: [] as string[],
+        textOnly: true,
         maxTurns: 1,
         model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
       };
@@ -1098,6 +1100,7 @@ async function refreshTodaySummary(today: string, convPath: string, mtime: numbe
         name: "Summarizer",
         systemPrompt: "주어진 대화 기록을 핵심 내용만 간결하게 요약하세요. 마크다운 형식으로 5-15줄 이내. 진행 중인 작업, 결정사항, 미완료 사항을 우선 포함.",
         allowedTools: [] as string[],
+        textOnly: true,
         maxTurns: 1,
         model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
       },
@@ -1168,6 +1171,7 @@ export async function runLibrarian(): Promise<void> {
 보호 대상 — 다음 페이지는 절대 삭제하지 마세요: ${[...PROTECTED_PAGE_NAMES].join(", ")}, ${PROTECTED_PAGE_PREFIXES.map((p) => p + "*").join(", ")}로 시작하는 페이지.
 이 페이지들에 대해서는 빈 content WIKI 태그를 절대 출력하지 마세요. 내용이 길면 요약만 허용됩니다.`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 5,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -1268,6 +1272,7 @@ export async function runWorkerLibrarian(agentId?: string): Promise<void> {
 
 보호 대상: ${[...PROTECTED_PAGE_NAMES].join(", ")}, ${PROTECTED_PAGE_PREFIXES.map((p) => p + "*").join(", ")}로 시작하는 페이지는 절대 삭제 금지.`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 5,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };

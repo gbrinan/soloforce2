@@ -197,7 +197,10 @@ export function permissionModeFor(level: string | undefined): "bypassPermissions
  * 여기서 던져야 jobs.ts 재시도 루프가 잡을 failed로 마감하고 사유를 남긴다.
  * 도입 전 전 직원(29명) 스캔으로 오탐 0(TOOLSET_EMPTY_COUNT=0)을 확인했다.
  */
-function assertToolsetNotEmpty(config: AgentConfig, mcpTools: string[]): void {
+export function assertToolsetNotEmpty(config: AgentConfig, mcpTools: string[]): void {
+  // 텍스트 전용 내부 유틸은 애초에 도구가 필요 없다. 이들까지 막으면 요약·메모리 플러시·
+  // 라이브러리안이 조용히 전멸한다(2026-08-08 가드 도입 이후 2026-09-26까지 실제로 그랬다).
+  if (config.textOnly === true) return;
   if (mcpTools.length > 0 || config.allowedTools.length > 0) return;
   throw new Error(
     `toolset-empty: ${config.role}(${config.name}) — 권한 미설정으로 가용 도구가 0개입니다. `

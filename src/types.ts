@@ -5,6 +5,8 @@ export interface AgentConfig {
   name: string;
   systemPrompt: string;
   allowedTools: string[];
+  /** 도구 없이 텍스트만 생성하는 내부 유틸(요약·메모리 플러시 등). 도구 0 가드를 명시적으로 면제한다. */
+  textOnly?: boolean;
   maxTurns: number;
   readPaths?: string[];
   writePaths?: string[];
