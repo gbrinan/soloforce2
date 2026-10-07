@@ -53,7 +53,9 @@ const JOB_ID = process.env.MCP_JOB_ID || undefined;
 // 그 외 패턴(src/, tmp/, package.json 등)은 CWD 기준 유지.
 // universal 패턴(/**, /*)은 양쪽 군에 모두 포함되어 잭키 readPaths=["/**"] 같은 케이스 보존.
 // 멀티 인스턴스: MYCREW_HOME=.mycrew-B 일 때 자기 인스턴스 history만 매칭, 다른 인스턴스 차단.
-const SELF_PATH_PREFIXES = ["history/outputs/", "history/agents/", "history/external/"];
+// history/ 전체를 데이터 루트(MYCREW_HOME)로 본다. 코드(릴리스)와 데이터가 분리된 배치(WSL, 2026-09-08~)에서
+// outputs·agents·external만 넘기면 history/skills·cost-log·conversations 등이 코드 폴더에서 찾아져 "no matches"가 된다.
+const SELF_PATH_PREFIXES = ["history/"];
 function isSelfPattern(p: string): boolean {
   const n = p.replace(/^\//, "");
   return SELF_PATH_PREFIXES.some((pre) => n.startsWith(pre));
