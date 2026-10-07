@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync, chmodSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync, chmodSync, readFileSync, renameSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentAdapter, AdapterOptions, AdapterResult } from "./types.js";
@@ -71,6 +71,40 @@ interface IsolatedHome {
   cleanup: () => void;
 }
 
+/**
+ * writePaths 항목을 codex가 쓸 수 있는 절대 경로로 푼다. history/*는 데이터 루트(MYCREW_HOME), 나머지는 코드 폴더.
+ * 코드(릴리스)와 데이터가 분리된 배치(WSL, 2026-09-08~)에서 /history/outputs/qa를 코드 폴더로 풀면 QA 보고서가 안 남는다.
+ */
+export function resolveCodexWritePath(p: string): string {
+  const cleaned = p.replace(/^\//, "").replace(/\/?\*\*$/, "");
+  return cleaned === "history" || cleaned.startsWith("history/")
+    ? join(MYCREW_HOME, cleaned)
+    : join(PROJECT_SELF_DIR, cleaned);
+}
+
+/**
+ * 잡 중에 codex가 갱신한 인증(auth.json 사본)을 원본에 되돌려 쓴다.
+ * 사본만 갱신되고 삭제되면 원본의 refresh token이 "already used"로 무효가 된다(2026-09-19~26 QA 23건 실패 원인).
+ * 사본이 깨졌거나 토큰이 없으면 원본을 건드리지 않는다.
+ */
+export function syncBackCodexAuth(jobAuth: string, userAuth: string): "updated" | "same" | "invalid" | "missing" {
+  if (!existsSync(jobAuth)) return "missing";
+  let raw: string;
+  try { raw = readFileSync(jobAuth, "utf-8"); } catch { return "missing"; }
+  try {
+    const parsed = JSON.parse(raw) as { tokens?: { refresh_token?: unknown } };
+    if (!parsed.tokens || typeof parsed.tokens.refresh_token !== "string" || !parsed.tokens.refresh_token) return "invalid";
+  } catch { return "invalid"; }
+  let current = "";
+  try { current = readFileSync(userAuth, "utf-8"); } catch { /* 원본 없음 → 새로 씀 */ }
+  if (current === raw) return "same";
+  const tmp = `${userAuth}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, raw, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(tmp, 0o600); } catch { /* */ }
+  renameSync(tmp, userAuth);
+  return "updated";
+}
+
 function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome {
   if (!existsSync(USER_AUTH)) {
     throw new Error(
@@ -112,8 +146,7 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
       .split(",")
       .filter(Boolean)
       .map((w) => {
-        const cleaned = w.replace(/^\//, "").replace(/\/?\*\*$/, "");
-        return JSON.stringify(join(PROJECT_SELF_DIR, cleaned));
+        return JSON.stringify(resolveCodexWritePath(w));
       })
       .join(", ")}]`,
     ``,
@@ -131,6 +164,10 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
   return {
     home,
     cleanup: () => {
+      try {
+        const r = syncBackCodexAuth(targetAuth, USER_AUTH);
+        if (r === "updated") console.log("[codex] 잡 중 갱신된 인증을 ~/.codex/auth.json에 반영");
+      } catch (e) { console.error("[codex] 인증 되돌려쓰기 실패:", e); }
       try { rmSync(home, { recursive: true, force: true }); } catch { /* */ }
     },
   };
@@ -305,7 +342,7 @@ export const codexCliAdapter: AgentAdapter = {
     ];
     if (config.writePaths) {
       for (const p of config.writePaths) {
-        const abs = p.startsWith("/") ? join(PROJECT_SELF_DIR, p.replace(/^\//, "")) : p;
+        const abs = p.startsWith("/") ? resolveCodexWritePath(p) : p;
         args.push("--add-dir", abs);
       }
     }
