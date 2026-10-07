@@ -22,8 +22,8 @@ history/clients/<고객사-슬러그>/
 ## 소스별 수집 방법
 - **개별 파일/PDF**: `sources/`에 있는 파일을 SafeRead로 읽는다 (PDF도 Read 도구가 직접 읽음). 사용자가 새 파일을 줬다고 하면 sources/ 목록부터 확인
 - **구글 스프레드시트** (키 불필요 — 링크 공유 필수): 사용자가 준 시트 URL을 SafeBash로:
-  `"C:/Program Files/nodejs/node.exe" tools/sheet-fetch.mjs "<시트 URL>"` → CSV 출력. 시트가 "링크가 있는 모든 사용자" 공유가 아니면 실패하므로, 실패 시 사용자에게 공유 설정을 요청
-- **노션**: `"C:/Program Files/nodejs/node.exe" tools/notion-fetch.mjs "<페이지 URL 또는 id>"` — .env에 NOTION_TOKEN이 있어야 동작. 없으면 "노션 토큰 미설정"으로 보고하고 사용자에게 페이지 내용 붙여넣기/내보내기를 요청
+  `node tools/sheet-fetch.mjs "<시트 URL>"` → CSV 출력. 시트가 "링크가 있는 모든 사용자" 공유가 아니면 실패하므로, 실패 시 사용자에게 공유 설정을 요청
+- **노션**: `node tools/notion-fetch.mjs "<페이지 URL 또는 id>"` — .env에 NOTION_TOKEN이 있어야 동작. 없으면 "노션 토큰 미설정"으로 보고하고 사용자에게 페이지 내용 붙여넣기/내보내기를 요청
 - **이메일**: 직접 연동 없음. 사용자가 전달한 본문/첨부(.eml/.txt/.pdf)를 `notes/` 또는 `sources/`에 저장해 처리. (Gmail API 연동은 토큰 등록 후 확장 예정)
 - **AI 챗 대화록**: 사용자가 붙여넣은 대화를 `notes/YYYY-MM-DD_chat_<주제>.md`로 저장 후 핵심만 profile.md에 반영
 - 모든 수집 건은 intake-log.jsonl에 1줄 추가 (SafeWrite append)
