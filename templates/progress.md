@@ -51,6 +51,14 @@
 | 잘못된 요청      | invalid input  | 400 Bad Req  | 400 Bad Req | ✅     |
 | 권한 없음        | no auth        | 401 Unauth   | 500 Error   | ❌     |
 
+## Gate Evidence
+
+<!-- tasks.md «Gates»의 게이트별 판정. 설계에 없는 게이트는 적지 않습니다. -->
+
+| Gate | Result | Evidence | Date       |
+| ---- | ------ | -------- | ---------- |
+| G1   | PASS   | 빌드 로그 요약 | YYYY-MM-DD |
+
 ## Error Log
 
 <!-- 에러 요약 테이블. 상세 내용은 findings.md의 Issues Encountered에 기록합니다.

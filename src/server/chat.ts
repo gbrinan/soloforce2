@@ -33,7 +33,10 @@ import { isSelectiveRecallEnabled, getRecallBudgetChars, buildWikiIndex, buildTo
 import { resolveTier } from "./model-tiers.js";
 import { modelForInternalSource } from "./internal-source-tier.js";
 import { resolveGenieSource } from "./cost-entry.js";
+import { isFreshNoticeSource, appendNoticeDigest, consumeNoticeDigest, makeDigestEntry } from "./notice-digest.js";
+import { ProgressGate, stallLimitFromEnv, buildStallPrompt } from "./auto-continuation-gate.js";
 
+import { withoutAnthropicKeys } from "./utils/safeChildEnv.js";
 // 침묵 catch 관측 훅 — 예상된 부재(ENOENT)는 무시, 그 외는 warn.
 // (플랫폼 분석 2026-07-04 P0: 빈 catch 26곳이 대화 유실을 은폐하던 문제)
 function swallow(context: string, err: unknown): void {
@@ -177,6 +180,20 @@ let autoContinuationCount = 0;
 const MAX_AUTO_CONTINUATIONS = 20;
 // 한도 도달 안내 1회 발화 플래그 — count 리셋 시 함께 리셋
 let autoCapNoticeSent = false;
+// 자동 진행 진척 게이트(auto-continuation-gate.ts). 연속 무진척 N회면 멈추고 AI 가 정체 보고.
+// 정체 상태는 사용자 메시지·모드 토글 시 풀린다(한도 도달과 같은 규칙).
+const autoProgressGate = new ProgressGate(stallLimitFromEnv());
+let autoContinuationStalled = false;
+const autoRecentRequests: string[] = [];
+const autoRecentOutputs: string[] = [];
+function resetAutoProgress(): void {
+  autoProgressGate.reset();
+  autoContinuationStalled = false;
+  autoRecentRequests.length = 0;
+  autoRecentOutputs.length = 0;
+}
+// 비재개 단발로 처리한 내부 알림의 한 줄 요약(최대 50줄). 다음 재개 턴에 1회 주입 후 소비.
+const NOTICE_DIGEST_FILE = join(ROOT_HISTORY_DIR, "genie", "notice-digest.jsonl");
 
 const AUTO_MODE_FILE = join(ROOT_HISTORY_DIR, "genie", ".auto-mode");
 
@@ -233,6 +250,7 @@ export function setAutoContinuationMode(v: boolean): void {
   const prev = autoContinuationMode;
   autoContinuationMode = v;
   if (!v) { autoContinuationCount = 0; autoCapNoticeSent = false; }
+  if (prev !== v) resetAutoProgress();
   if (prev !== v) {
     console.log(`[MyCrew] 자동 진행 모드: ${v ? "ON" : "OFF"}`);
     emitGlobalEvent("genie-status", { busy: genieBusy, task: genieTask, startTime: genieBusy ? activeStreamStartTime : undefined, autoMode: v, autoCount: autoContinuationCount });
@@ -307,6 +325,11 @@ export async function triggerGenieAutoContinuation(
     notifyAutoCapOnce();
     return;
   }
+  // 진척 게이트로 멈춘 상태 — 정체 보고는 이미 나갔다. 사용자 메시지가 오면 풀린다.
+  if (autoContinuationStalled) {
+    console.log(`[AutoMode] 정체로 정지 중 — '${jobRequest.slice(0, 40)}' 완료 건은 자동 진행하지 않음`);
+    return;
+  }
   pendingAutoJobs.push({ request: jobRequest, status: jobStatus });
   if (autoDrainActive) return; // 이미 대기 중인 드레인이 함께 처리
   autoDrainActive = true;
@@ -350,7 +373,27 @@ export async function triggerGenieAutoContinuation(
     }
 
     try {
-      await sendMessage(prompt, undefined, undefined, { internal: true, source: "chat:auto-continuation" });
+      // 진척 관측: 턴 전후 TODO 서명 + 새 위임 수 + 출력(루프 감지).
+      const todoSigBefore = todoSignature();
+      const reply = await sendMessage(prompt, undefined, undefined, { internal: true, source: "chat:auto-continuation" });
+      for (const b of batch) autoRecentRequests.push(`${b.request.slice(0, 100)} (${b.status === "completed" ? "완료" : "실패"})`);
+      if (autoRecentRequests.length > 10) autoRecentRequests.splice(0, autoRecentRequests.length - 10);
+      if (reply.content.trim()) autoRecentOutputs.push(reply.content);
+      if (autoRecentOutputs.length > 5) autoRecentOutputs.splice(0, autoRecentOutputs.length - 5);
+      const g = autoProgressGate.record({
+        output: reply.content,
+        jobsCreated: reply.jobs?.length ?? 0,
+        todoSigBefore,
+        todoSigAfter: todoSignature(),
+      });
+      console.log(`[AutoMode] 진척 판정: ${g.progress ? "진척" : "무진척"}(${g.why}) 연속무진척=${autoProgressGate.consecutiveNoProgress}/${autoProgressGate.limit}`);
+      if (g.stalled) {
+        autoContinuationStalled = true;
+        pendingAutoJobs = [];
+        console.warn(`[AutoMode] 연속 ${autoProgressGate.limit}회 무진척 — 자동 진행 정지, 정체 보고 발화`);
+        await reportAutoContinuationStall(g.why);
+        return;
+      }
     } catch (err) {
       if (!(err instanceof Error && err.message === "genie_queued")) {
         console.error("[MyCrew] 자동 진행 트리거 실패:", err);
@@ -360,6 +403,28 @@ export async function triggerGenieAutoContinuation(
   }
   } finally {
     autoDrainActive = false;
+  }
+}
+
+// TODO 상태 서명 — 자동 진행 턴 전후 비교용(같으면 TODO 변화 없음).
+function todoSignature(): string {
+  try {
+    return getTodos().map((t) => `${t.id}:${t.status}:${t.state ?? ""}`).sort().join("|");
+  } catch { return ""; }
+}
+
+// AI-last: 정체 시 저가 단발(비재개) 호출로 «무엇이 막혔는지 / 다음에 필요한 것»을 채팅에 남긴다.
+// 실패하면 시스템 문구로 대신 알린다(조용한 정지 금지).
+async function reportAutoContinuationStall(why: string): Promise<void> {
+  try {
+    const p = buildStallPrompt(autoRecentRequests, autoRecentOutputs, why, getUserTitle());
+    const r = await sendMessage(p, undefined, undefined, { internal: true, source: "chat:auto-continuation-stalled" });
+    if (!/^\[(NOTIFY|REPORT)\]/i.test(r.content.trim())) {
+      addGenieMessage(`⏸️ 자동 진행이 ${autoProgressGate.limit}회 연속 진척 없이 반복돼 멈췄어요. 이어가려면 메시지를 보내주세요.`);
+    }
+  } catch (err) {
+    console.error("[AutoMode] 정체 보고 실패:", err);
+    addGenieMessage(`⏸️ 자동 진행이 ${autoProgressGate.limit}회 연속 진척 없이 반복돼 멈췄어요. 이어가려면 메시지를 보내주세요.`);
   }
 }
 
@@ -489,7 +554,9 @@ async function runRestartSafetyGate(): Promise<RestartGateResult> {
     return { ok: false, stage: "health", detail: `임시 포트 확보 실패: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  const dryRunLog = join(PROJECT_SELF_DIR, "history", `.dry-run-${port}.log`);
+  // 설치 릴리스는 읽기 전용이고 history/가 없을 수 있다. 런타임 데이터 루트에 기록해야
+  // systemd 배포에서도 안전 재시작 게이트가 임시 서버를 띄울 수 있다.
+  const dryRunLog = join(ROOT_HISTORY_DIR, `.dry-run-${port}.log`);
   let pid = -1;
   try {
     pid = await spawnDryRunTestServer(port, dryRunLog);
@@ -521,7 +588,7 @@ async function spawnDryRunTestServer(port: number, logFile: string): Promise<num
     cwd: PROJECT_SELF_DIR,
     detached: true,
     stdio: ["ignore", out, err],
-    env: { ...process.env, PORT: String(port), DRY_RUN: "1" },
+    env: withoutAnthropicKeys({ ...process.env, PORT: String(port), DRY_RUN: "1" }),
   });
   child.unref();
   return child.pid ?? -1;
@@ -571,6 +638,8 @@ function getToday(): string {
 }
 
 let lastUserMessageTime = Date.now();
+/** 마지막 사용자 채팅 시각(ms). 상태 변화 배칭의 활동 판정용(state-change-batch.ts). */
+export function getLastUserMessageTime(): number { return lastUserMessageTime; }
 const ABSENCE_THRESHOLD = 30 * 60 * 1000; // 30분
 
 // 직전 상황 블록 본문(시각 제외) — 무변동 축약 비교용
@@ -873,6 +942,7 @@ async function flushSessionMemory(): Promise<void> {
 저장할 것: 결정사항, 작업 결과, 사용자 요청, 프로젝트 상태
 저장하지 않을 것: 인사, 이미 저장된 정보, 일상 대화`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 1,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -959,6 +1029,7 @@ async function generateDailySummaries(): Promise<void> {
         name: "Summarizer",
         systemPrompt: "주어진 대화 기록을 핵심 내용만 간결하게 요약하세요. 마크다운 형식으로 5-10줄 이내.",
         allowedTools: [] as string[],
+        textOnly: true,
         maxTurns: 1,
         model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
       };
@@ -1096,6 +1167,7 @@ async function refreshTodaySummary(today: string, convPath: string, mtime: numbe
         name: "Summarizer",
         systemPrompt: "주어진 대화 기록을 핵심 내용만 간결하게 요약하세요. 마크다운 형식으로 5-15줄 이내. 진행 중인 작업, 결정사항, 미완료 사항을 우선 포함.",
         allowedTools: [] as string[],
+        textOnly: true,
         maxTurns: 1,
         model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
       },
@@ -1166,6 +1238,7 @@ export async function runLibrarian(): Promise<void> {
 보호 대상 — 다음 페이지는 절대 삭제하지 마세요: ${[...PROTECTED_PAGE_NAMES].join(", ")}, ${PROTECTED_PAGE_PREFIXES.map((p) => p + "*").join(", ")}로 시작하는 페이지.
 이 페이지들에 대해서는 빈 content WIKI 태그를 절대 출력하지 마세요. 내용이 길면 요약만 허용됩니다.`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 5,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -1266,6 +1339,7 @@ export async function runWorkerLibrarian(agentId?: string): Promise<void> {
 
 보호 대상: ${[...PROTECTED_PAGE_NAMES].join(", ")}, ${PROTECTED_PAGE_PREFIXES.map((p) => p + "*").join(", ")}로 시작하는 페이지는 절대 삭제 금지.`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 5,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -1893,7 +1967,9 @@ async function _sendMessageImpl(
   // busy 큐잉은 sendMessage() (lock 밖)에서 처리됨 — 여기서는 lock 안이므로 idle 보장.
 
   // 사용자 메시지 시 자동 진행 count 리셋 (한도 초과 후에도 새 작업에서 자동 진행 재개)
-  if (!isInternal) { autoContinuationCount = 0; autoCapNoticeSent = false; }
+  if (!isInternal) { autoContinuationCount = 0; autoCapNoticeSent = false; resetAutoProgress(); }
+  // 단순 내부 알림은 genie 장기 세션을 재개하지 않고 단발(새 세션)로 처리한다(notice-digest.ts).
+  const freshNotice = isInternal && isFreshNoticeSource(options?.source);
 
   // 사용자 메시지 저장 (internal이면 건너뜀 — 시스템 자동 진행 프롬프트는 채팅에 표시하지 않음)
   // pendingId 있으면 = drainQueue 처리 흐름 → 사전 등록된 user msg의 pending 해제만.
@@ -1955,8 +2031,11 @@ ${tagSection}`;
 
   let prompt: string;
 
-  // 새 세션일 때 위키(기억) + 최근 대화를 프롬프트에 포함
-  if (!sessionId) {
+  if (freshNotice) {
+    // 단발 알림: 대화·위키·일일요약 없이 «조직/태그 규칙 + 현재 상황 + 알림»만.
+    // 시스템 프롬프트(genie 지시)·도구·권한은 runAgent 가 비재개 시 그대로 싣는다.
+    prompt = `${tagRules}\n\n${statusBlock}\n\n[단발 처리] 이 알림은 대화 세션과 분리된 단발 호출입니다(이전 대화 맥락 없음). 알림에 필요한 조치만 하세요. 처리 결과는 다음 대화 턴에 요약으로 전달됩니다.\n\n${message}`;
+  } else if (!sessionId) {
     // 세션 리셋 시점 기록 (startedAt + baseTokens 초기화)
     try {
       const sf = SESSION_FILE;
@@ -2049,6 +2128,12 @@ ${tagSection}`;
     }
     // resume: 시스템 상황만
     prompt = `${statusBlock}\n\n${message}`;
+  }
+
+  // 재개(또는 새) 대화 턴: 그동안 단발로 처리된 알림 요약을 1회 덧붙이고 소비 처리.
+  if (!freshNotice) {
+    const digest = consumeNoticeDigest(NOTICE_DIGEST_FILE);
+    if (digest) prompt = `${digest}\n\n${prompt}`;
   }
 
   if (attachments?.length) {
@@ -2163,10 +2248,11 @@ ${tagSection}`;
   } catch (e) { swallow("PTY 릴리스", e); }
   let result;
   try {
-    const chatFileExists = sessionId ? claudeSessionExists(sessionId, process.cwd()) : false;
+    const chatFileExists = !freshNotice && sessionId ? claudeSessionExists(sessionId, process.cwd()) : false;
     result = await runAgent(getGenieAgent(), "chat", prompt, {
+      // freshNotice: resume/sessionId 둘 다 생략 → CLI 가 새 세션을 만든다(genie 세션 포인터 불변).
       resumeSessionId: chatFileExists ? sessionId : undefined,
-      sessionId: (!chatFileExists && sessionId) ? sessionId : undefined,
+      sessionId: (!freshNotice && !chatFileExists && sessionId) ? sessionId : undefined,
       model: lightModel,
       partialStream: !isInternal, // A1: 토큰 단위 스트리밍 (대시보드 표시 콜만)
       onText,
@@ -2234,7 +2320,7 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
   //  (2) 스테일 락 — 이전 claude가 SIGKILL(lease/watchdog)로 죽으며 남긴 in-use 마커.
   //      실제로 세션을 물고 있는 프로세스가 없다 → 영구 충돌. 새 세션으로 자동 복구(1회 재시도).
   //  (2)는 아난다라 폭주 때 워커 SIGKILL이 잦아지며 노출된 케이스(2026-07-13).
-  if (!result.success && /already in use/i.test(result.error ?? "")) {
+  if (!freshNotice && !result.success && /already in use/i.test(result.error ?? "")) {
     let ptyLive = false;
     try {
       const tw = await import("./terminal-ws.js");
@@ -2278,7 +2364,8 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
   }
 
   // 세션 만료 — 플러시 후 마이크루가 자고 있음
-  if (!result.success && sessionId) {
+  // 단발 알림의 실패는 genie 세션과 무관 — 세션 만료로 오판해 대화 세션을 날리지 않는다.
+  if (!freshNotice && !result.success && sessionId) {
     console.log("[MyCrew] 세션 만료 — 기억 플러시 후 마이크루가 잠듭니다");
     await flushSessionMemory();
     sessionId = undefined;
@@ -2296,8 +2383,8 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
     return sleepMsg;
   }
 
-  // 세션 ID 저장
-  if (result.sessionId) {
+  // 세션 ID 저장 (단발 알림의 새 세션 ID 는 저장하지 않는다 — genie 대화 세션 유지)
+  if (result.sessionId && !freshNotice) {
     sessionId = result.sessionId;
     saveSession();
   }
@@ -2307,7 +2394,7 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
   //         원장에 남긴다. 이게 없어서 genie 행이 전부 한 덩어리였다(2026-08-23 시정).
   if (result.cost) {
     logCost("genie", undefined, result.cost, genieCostSource);
-    if (result.cost.cacheReadTokens) {
+    if (result.cost.cacheReadTokens && !freshNotice) {
       try {
         const sd = existsSync(SESSION_FILE) ? JSON.parse(readFileSync(SESSION_FILE, "utf-8")) : {};
         if (!sd.baseTokens) sd.baseTokens = result.cost.cacheReadTokens;
@@ -2319,7 +2406,7 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
 
   // 비용 기반 세션 리셋 체크: cacheReadTokens가 maxCacheTokens 초과 시 다음 호출을 새 세션으로
   const genieMaxCache = getGenieAgent().maxCacheTokens ?? 0;
-  if (genieMaxCache > 0 && result.cost?.cacheReadTokens) {
+  if (genieMaxCache > 0 && result.cost?.cacheReadTokens && !freshNotice) {
     lastGenieCacheTokens = result.cost.cacheReadTokens;
     if (cacheCapExceeded(lastGenieCacheTokens, genieMaxCache) && sessionId) {
       console.log(`[MyCrew] 캐시 토큰 임계 초과 (${(lastGenieCacheTokens / 1_000_000).toFixed(1)}M > ${genieMaxCache / 1_000_000}M) → 다음 메시지에서 세션 리셋 예정`);
@@ -2574,6 +2661,13 @@ function quarantinePoisonedSession(poisonedId: string): boolean {
       // RESTART 처리 완료 — 정상 응답 흐름 건너뜀 (internal 플래그로 UI 렌더링 방지)
       return { id: randomUUID(), role: "genie", content: "", timestamp: new Date().toISOString(), internal: true };
     }
+  }
+
+  // 단발 알림 처리 결과를 다이제스트에 한 줄 남긴다(다음 재개 턴에 1회 주입).
+  if (freshNotice) {
+    const jobNote = createdJobs.length ? ` [위임 ${createdJobs.length}건: ${createdJobs.map((j) => j.request.slice(0, 40)).join(" / ")}]` : "";
+    const replyNote = result.success ? content : `(처리 실패: ${(result.error ?? "").slice(0, 80)})`;
+    appendNoticeDigest(NOTICE_DIGEST_FILE, makeDigestEntry(options?.source ?? "internal", message, replyNote + jobNote));
   }
 
   // 태그 제거 후 무의미한 응답 필터링 (CHECKIN 등의 부산물)

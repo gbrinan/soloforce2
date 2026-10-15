@@ -6,7 +6,8 @@ import { transitionTodosForJob } from "./todos.js";
 import { runWatchdog } from "./watchdog.js";
 import { maybeRunFriendSyncCycle, initFriendSyncState } from "./friend-sync.js";
 import type { Job } from "../types.js";
-import { addGenieMessage, runGenieAgent, runLibrarian, runWorkerLibrarian, resetGenieSession, sendMessage, waitForGenieIdle, isOnboardingNeeded, getGenieName } from "./chat.js";
+import { addGenieMessage, runGenieAgent, runLibrarian, runWorkerLibrarian, resetGenieSession, sendMessage, waitForGenieIdle, isOnboardingNeeded, getGenieName, getLastUserMessageTime } from "./chat.js";
+import { StateChangeBatcher, batchConfigFromEnv, decideStateChangeMode } from "./state-change-batch.js";
 import { getOrCreateRoutineMaster, createRoutineInstance } from "./tasks.js";
 import { checkLoops } from "./loops/index.js";
 import { archiveWikiPage } from "./audit.js";
@@ -562,13 +563,40 @@ const MAX_REPORT_ATTEMPTS = 5;
 // genie 호출 진행 중이면 다음 tick 스킵 — 매분 직렬 호출이 사용자 메시지를 블로킹하지 않도록.
 let eventDrivenInFlight = false;
 
+// 상태 변화 적응형 배칭(state-change-batch.ts). 활동 중엔 실시간, 한가하면 BATCH_MS 마다 묶어 1회.
+const stateBatchConfig = batchConfigFromEnv();
+const stateBatcher = new StateChangeBatcher(stateBatchConfig.batchMs);
+// «활동»으로 보는 진행 중 잡 상태. awaiting_approval 은 사람 대기라 활동으로 치지 않는다.
+const ACTIVE_JOB_STATUSES: ReadonlySet<string> = new Set(["queued", "planning", "running"]);
+
 async function eventDrivenCheck(state: SchedulerState): Promise<void> {
   if (eventDrivenInFlight) {
     console.log("[Scheduler] eventDrivenCheck 진행 중 — 이번 tick 스킵");
     return;
   }
   const { jobEvents, idleEvent } = detectChanges();
-  if (jobEvents.length === 0 && !idleEvent) return;
+  if (jobEvents.length === 0 && !idleEvent) {
+    // 보류 중이던 사건이 다른 경로로 전부 보고됐다 — 배칭 창을 닫는다.
+    stateBatcher.markFlushed();
+    return;
+  }
+
+  // 적응형 배칭: 미보고 잡이 디스크에 남아 있으므로 «보류 = 이번 tick 에 안 보냄»이면 충분하다.
+  const nowMs = Date.now();
+  const activeJobs = getAllJobs().filter((j) => ACTIVE_JOB_STATUSES.has(j.status as string)).length + getBusyAgentIds().length;
+  const batchMode = decideStateChangeMode({
+    nowMs,
+    lastUserMessageMs: getLastUserMessageTime(),
+    runningOrQueuedJobs: activeJobs,
+    activeWindowMs: stateBatchConfig.activeWindowMs,
+  });
+  const batchDecision = stateBatcher.shouldSend(batchMode, nowMs);
+  if (!batchDecision.send) {
+    if (batchDecision.reason === "idle-buffer-start") {
+      console.log(`[Scheduler] 한가 모드 — 상태 변화 ${jobEvents.length + (idleEvent ? 1 : 0)}건 보류(${Math.round(stateBatchConfig.batchMs / 1000)}초 단위 묶음)`);
+    }
+    return;
+  }
 
   // 마지막 호출 후 최소 1분 대기 (너무 자주 호출 방지)
   if (state.lastProactiveCheck) {
@@ -577,6 +605,9 @@ async function eventDrivenCheck(state: SchedulerState): Promise<void> {
   }
 
   eventDrivenInFlight = true;
+  // 이번 tick 이 보류분까지 한 번에 보낸다 — 배칭 창 종료(전송 실패 시 미보고 잡은 다음 tick 에 재검출).
+  stateBatcher.markFlushed();
+  if (batchDecision.reason !== "realtime") console.log(`[Scheduler] 상태 변화 묶음 발송 (${batchDecision.reason})`);
   state.lastProactiveCheck = new Date().toISOString();
   try {
   // throttle race 방지: sendMessage가 await으로 수십 초 걸리는 동안
@@ -755,6 +786,7 @@ async function generateDailySummaries(): Promise<void> {
       name: "DailySummary",
       systemPrompt: `당신은 하루 업무 요약 담당입니다. 주어진 위키 페이지들을 50줄 이내의 하루 요약으로 정리하세요. 핵심 결정사항, 작업 결과, 발견된 문제를 중심으로. 불필요한 세부사항은 제거.`,
       allowedTools: [] as string[],
+      textOnly: true,
       maxTurns: 5,
       model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
     };
@@ -809,6 +841,7 @@ async function generateDailySummaries(): Promise<void> {
           name: "DailySummary",
           systemPrompt: `당신은 하루 업무 요약 담당입니다. 주어진 위키 페이지들을 50줄 이내의 하루 요약으로 정리하세요. 핵심 결정사항, 작업 결과, 발견된 문제를 중심으로.`,
           allowedTools: [] as string[],
+          textOnly: true,
           maxTurns: 5,
           model: resolveTier("cheap"), // 저비용 티어 핀 — 프론티어 모델 불필요
         };

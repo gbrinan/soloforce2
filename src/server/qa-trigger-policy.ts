@@ -56,10 +56,41 @@ export interface QaDecision {
   isSample: boolean;
 }
 
+/**
+ * 루프 러너가 모든 스텝 요청 앞에 붙이는 정책 문구의 표식.
+ * 이 문구에는 "외부 발신·전송은 … 한해서만" 같은 금지 문장이 들어 있어, 어휘 판정이
+ * «발신을 금지하는 문장»을 «발신 의심»으로 오인했다. 그 결과 9/15~9/26 자동 QA 74회 중
+ * 70회(95%)가 이 오탐으로 발동했다(2026-09-26 실측). 러너 쪽 문구와 표식이 어긋나지 않도록
+ * 회귀 테스트가 runner.ts 소스를 직접 대조한다.
+ */
+export const LOOP_POLICY_MARKER = "[루프 정책]";
+
+/** 루프 러너가 보낸 정기 작업인가. 이런 작업은 루프의 승인 모드·권한 게이트가 발신을 사전에 통제한다. */
+export function isLoopDispatched(request: string): boolean {
+  return (request || "").includes(LOOP_POLICY_MARKER);
+}
+
 export function externalSendSuspected(agentId: string | undefined, request: string): boolean {
   if (agentId && EXTERNAL_SEND_AGENTS.has(agentId)) return true;
   return OUTBOUND_RE.test(request || "");
 }
+
+/**
+ * 점검용 핑(하네스·헬스 체크) 요청인가. 이런 잡은 검증할 산출물이 없어 QA가 붙으면 비용만 들고
+ * "보고 형식 누락"으로 기록된다(2026-09-15 3건). 짧은 요청 + 명시적 핑 표현일 때만 참 — 실제 작업 오탐 방지.
+ */
+export function isHealthPing(request: string): boolean {
+  const r = (request || "").trim();
+  if (r.length > 400) return false;
+  if (/^[A-Z][A-Z0-9_]*_READY$/.test(r)) return true;
+  // 핑의 공통 형태: "도구 호출·파일 읽기를 하지 말고" + "X 한 단어만 반환" (9/15 하네스·Opus·재시작 게이트 핑 전부 이 형태)
+  const noTools = /(도구 호출|파일 읽기|외부 조회)[^.\n]{0,30}(하지 마|하지 말|일절)/.test(r);
+  const oneWord = /한 단어만\s*(반환|답)/.test(r);
+  return noTools && oneWord;
+}
+
+/** 주 1회 QA 표본에서 제외하는 수집 전용 에이전트(자체 검증 보유). 코드 변경·외부 발신 QA는 그대로다. */
+export const QA_SAMPLE_EXEMPT_AGENTS: ReadonlySet<string> = new Set(["ingestiger", "spf-kakao-collect", "mail-secretary"]);
 
 export function decideQa(input: QaDecisionInput): QaDecision {
   // 0. 옵트아웃 — 새 조건보다 «항상» 세다.
@@ -71,6 +102,9 @@ export function decideQa(input: QaDecisionInput): QaDecision {
   // 1. 명시 요청 — 최우선 발동.
   if (input.forceQa === true) return { run: true, reason: "forceQa(호출자 명시)", isSample: false };
 
+  // 1-1. 점검용 핑 — 검증할 산출물이 없다. 코드 변경 판정보다 먼저 본다(판정 불가 null로 QA가 붙던 경로 차단).
+  if (isHealthPing(input.request)) return { run: false, reason: "health-ping(점검용 핑)", isSample: false };
+
   // 2. 코드 변경 — 여기가 결함이 나오는 곳. 줄이지 않는다.
   //    판정 불가(null)면 안전측으로 «수행».
   if (input.jobScopedCodeChanges === null) {
@@ -81,8 +115,18 @@ export function decideQa(input: QaDecisionInput): QaDecision {
   }
 
   // 3. 코드 변경 0건 — 외부 발신이면 유지.
-  if (externalSendSuspected(input.agentId, input.request)) {
+  //    단 루프 정기 작업은 제외하고 아래 주 1회 표본으로 보낸다(2026-09-26 아난 결정).
+  //    자동 QA는 작업이 «끝난 뒤» 도는 사후 감사라 이미 나간 발신을 막지 못한다 — 루프 발신의
+  //    실제 통제는 실행 전 단계(루프 승인 모드·safefs 권한 게이트)가 맡는다.
+  if (!isLoopDispatched(input.request) && externalSendSuspected(input.agentId, input.request)) {
     return { run: true, reason: "external-send-suspected(되돌릴 수 없음)", isSample: false };
+  }
+
+  // 3-1. 자체 검증이 있는 수집 전용 에이전트는 주 1회 표본에서도 뺀다(2026-10-02 아난 결정).
+  //      ingestiger(인용·구조 검증 내장), spf-kakao-collect(파서 검증), mail-secretary(초안만·발송 불가).
+  //      코드 변경·외부 발신은 위 2·3단계에서 이미 걸러지므로 여기 도달한 건 단순 수집·정리다.
+  if (QA_SAMPLE_EXEMPT_AGENTS.has(input.agentId)) {
+    return { run: false, reason: `sample-exempt(수집 전용·자체 검증: ${input.agentId})`, isSample: false };
   }
 
   // 4. 코드 변경 0건 + 외부 발신 없음 → 주 1회 표본만.
@@ -110,4 +154,19 @@ export function decideQa(input: QaDecisionInput): QaDecision {
 export function newCodeChanges(baseline: string[] | undefined, current: string[]): string[] {
   const seen = new Set(baseline ?? []);
   return current.filter((p) => !seen.has(p));
+}
+
+// ── QA 모델 티어 (2026-09-28 아난 결정: 간단한 검증은 terra, 위험한 검증은 sol) ──
+export const QA_MODEL_HEAVY = "gpt-5.6-sol";
+export const QA_MODEL_LIGHT = "gpt-5.6-terra";
+
+/**
+ * QA 잡에 쓸 codex 모델을 고른다. QA가 codex-cli일 때만 값을 돌려주고, 그 밖엔 undefined(에이전트 기본 모델 유지).
+ * 코드 변경(판정 불가 포함)·외부 발신 의심·명시 요청·code/data 유형 → heavy, 나머지(루프 표본의 문서·일반 검증) → light.
+ */
+export function pickQaModel(input: { adapter?: string; reason: string; profile?: string }): string | undefined {
+  if (input.adapter !== "codex-cli") return undefined;
+  const heavyReason = /^(code-change|external-send|forceQa)/.test(input.reason);
+  const heavyProfile = input.profile === "code" || input.profile === "data";
+  return heavyReason || heavyProfile ? QA_MODEL_HEAVY : QA_MODEL_LIGHT;
 }

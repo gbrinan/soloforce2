@@ -58,6 +58,18 @@ export function safeChildEnv(extra?: Record<string, string>): Record<string, str
   return env;
 }
 
+/**
+ * 전체 환경 상속이 필요한 spawn(앱·bash·자기 재기동)용: 그대로 복사하되 앤트로픽 유료 API 키만 제거.
+ * (2026-10-02) jobs 사후검증 bash·SafeBash·앱 spawn·드라이런이 process.env를 통째로 넘겨
+ * 키가 유입되면 그 안에서 실행된 claude가 PAYG 크레딧을 쓸 수 있었다.
+ */
+export function withoutAnthropicKeys(env: NodeJS.ProcessEnv | Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
+  for (const blocked of BLOCKED_KEYS) delete out[blocked];
+  return out;
+}
+
 /** claude -p (비대화형 워커) 실행에 추가로 필요한 키 — Google OAuth·PORT·NGROK 제외 */
 const CLI_AUTH_KEYS: ReadonlyArray<string> = [
   "ANTHROPIC_BASE_URL",

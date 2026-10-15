@@ -10,12 +10,12 @@ SafeBash의 PATH는 로그인 셸과 다르다. `node`·`py`·`python`이 PATH�
 
 | 런타임 | 경로 |
 |---|---|
-| Node | `"C:/Program Files/nodejs/node.exe"` |
-| Python | `C:/Users/user/AppData/Local/Programs/Python/Python313/python.exe` |
+| Node | `node` |
+| Python | `python3` |
 
 ```
-"C:/Program Files/nodejs/node.exe" tools/gemini-search.mjs "검색어"
-C:/Users/user/AppData/Local/Programs/Python/Python313/python.exe vendor/last30days/scripts/last30days.py "주제" --days=30 --emit=compact
+node tools/gemini-search.mjs "검색어"
+python3 vendor/last30days/scripts/last30days.py "주제" --days=30 --emit=compact
 ```
 
 이 값들은 **이 설치본의 예시**다. 다른 머신·OS에서는 다르고, Python 경로에는 사용자명이 박혀 있다. 경로가 틀려서 실패하면 지어내서 고치지 말고 "인터프리터 경로 불일치"로 보고한다.

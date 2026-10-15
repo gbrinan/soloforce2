@@ -28,6 +28,7 @@ export function classifyExit(
   logs: string[],
   agentSuccess: boolean,
   agentError?: string,
+  textOnly = false,
 ): ClassifyResult {
   // 1. stderr 추출 (로그에서 [ERROR] 라인)
   const stderr = logs
@@ -71,6 +72,8 @@ export function classifyExit(
       };
     }
   }
+
+  if (textOnly) return { status: "completed" };
 
   // 4. exit 0 + 보고 형식 검사
   const has5StageReport =

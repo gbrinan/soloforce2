@@ -13,7 +13,8 @@ import {
 export const GOOGLE_DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 export const GOOGLE_READONLY_SCOPES = ["openid", "email", GOOGLE_DRIVE_METADATA_SCOPE] as const;
 
-type ProviderOptions = {
+export type ProviderOptions = {
+  readonly scopes?: readonly string[];
   readonly clientId: string;
   readonly clientSecret: string;
   readonly redirectUri: string;
@@ -83,7 +84,7 @@ export class GoogleReadonlyHttpProvider implements GoogleReadonlyProvider {
     url.searchParams.set("client_id", this.#options.clientId);
     url.searchParams.set("redirect_uri", this.#options.redirectUri);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", GOOGLE_READONLY_SCOPES.join(" "));
+    url.searchParams.set("scope", (this.#options.scopes ?? GOOGLE_READONLY_SCOPES).join(" "));
     url.searchParams.set("state", input.state);
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent select_account");

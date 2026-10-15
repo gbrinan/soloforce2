@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync, chmodSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync, chmodSync, readFileSync, renameSync, statSync } from "node:fs";
+import fg from "fast-glob";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentAdapter, AdapterOptions, AdapterResult } from "./types.js";
 import type { AgentConfig, AgentResult } from "../types.js";
 import { PROJECT_SELF_DIR, PROJECTS_DIR, MYCREW_HOME, TSX_BIN, TSX_CLI_ARGS } from "../config.js";
+import { resolveAgentMcpServers } from "../server/mcp-registry.js";
 import { computeMemoryDir } from "../mcp/memory-dir.js";
 import { safeKill } from "../server/utils/platform.js";
 import { findLatestCodexSessionModel } from "./codex-session-model.js";
@@ -71,7 +73,88 @@ interface IsolatedHome {
   cleanup: () => void;
 }
 
-function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome {
+/**
+ * writePaths 항목을 codex가 쓸 수 있는 절대 경로로 푼다. history/*는 데이터 루트(MYCREW_HOME), 나머지는 코드 폴더.
+ * 코드(릴리스)와 데이터가 분리된 배치(WSL, 2026-09-08~)에서 /history/outputs/qa를 코드 폴더로 풀면 QA 보고서가 안 남는다.
+ */
+export function resolveCodexWritePath(p: string): string {
+  const cleaned = p.replace(/^\//, "").replace(/\/?\*\*$/, "");
+  return cleaned === "history" || cleaned.startsWith("history/")
+    ? join(MYCREW_HOME, cleaned)
+    : join(PROJECT_SELF_DIR, cleaned);
+}
+
+/**
+ * codex 샌드박스 writable_roots / --add-dir 로 넘길 디렉터리 목록.
+ * codex는 루트마다 그 안에 보호용 .codex 를 만들어 보므로, 파일·미존재 경로·미전개 glob이 섞이면
+ * "failed to inspect synthetic bubblewrap mount target <root>/.codex: Not a directory"로 샌드박스 전체가 실패한다(2026-09-28).
+ * - glob(*)은 실제 디렉터리로 전개한다.
+ * - history/* 디렉터리는 없으면 만든다(데이터 루트 안). 코드 쪽 미존재 경로는 만들지 않고 뺀다.
+ * - 파일 경로는 뺀다 — 단일 파일 쓰기는 SafeFS(SafeWrite)가 writePaths로 따로 통제한다.
+ */
+export function codexWritableRoots(writePaths: string[]): string[] {
+  const out: string[] = [];
+  const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
+  for (const w of writePaths) {
+    const abs = resolveCodexWritePath(w);
+    if (abs.includes("*")) {
+      for (const m of fg.sync(abs.replace(/\/+$/, ""), { onlyDirectories: true, absolute: true, dot: true })) out.push(m);
+      continue;
+    }
+    if (isDir(abs)) { out.push(abs); continue; }
+    if (existsSync(abs)) continue; // 파일
+    const cleaned = w.replace(/^\//, "");
+    if (cleaned.startsWith("history/") && /\*\*$|\/$/.test(w)) {
+      try { mkdirSync(abs, { recursive: true }); out.push(abs); } catch { /* 만들 수 없으면 뺀다 */ }
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * 잡 중에 codex가 갱신한 인증(auth.json 사본)을 원본에 되돌려 쓴다.
+ * 사본만 갱신되고 삭제되면 원본의 refresh token이 "already used"로 무효가 된다(2026-09-19~26 QA 23건 실패 원인).
+ * 사본이 깨졌거나 토큰이 없으면 원본을 건드리지 않는다.
+ */
+export function syncBackCodexAuth(jobAuth: string, userAuth: string): "updated" | "same" | "invalid" | "missing" {
+  if (!existsSync(jobAuth)) return "missing";
+  let raw: string;
+  try { raw = readFileSync(jobAuth, "utf-8"); } catch { return "missing"; }
+  try {
+    const parsed = JSON.parse(raw) as { tokens?: { refresh_token?: unknown } };
+    if (!parsed.tokens || typeof parsed.tokens.refresh_token !== "string" || !parsed.tokens.refresh_token) return "invalid";
+  } catch { return "invalid"; }
+  let current = "";
+  try { current = readFileSync(userAuth, "utf-8"); } catch { /* 원본 없음 → 새로 씀 */ }
+  if (current === raw) return "same";
+  const tmp = `${userAuth}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, raw, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(tmp, 0o600); } catch { /* */ }
+  renameSync(tmp, userAuth);
+  return "updated";
+}
+
+/**
+ * 에이전트에 할당된 MCP 서버(레지스트리 정의)를 codex config.toml 블록으로 렌더한다(순수 함수).
+ * codex exec는 비대화형이라 승인이 필요한 서버는 호출이 자동 취소되므로 allow 모드 서버만 싣고, 도구는 자동 승인한다.
+ * safefs는 별도 블록이 있으므로 제외한다. (2026-09-28 — codex QA가 playwright·notion을 못 쓰던 문제)
+ */
+export function renderCodexMcpServers(
+  servers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>,
+  allowNames: string[],
+): string {
+  const out: string[] = [];
+  for (const [name, def] of Object.entries(servers)) {
+    if (name === "safefs" || !allowNames.includes(name)) continue;
+    const key = JSON.stringify(name);
+    out.push(`[mcp_servers.${key}]`, `command = ${JSON.stringify(def.command)}`, `args = ${JSON.stringify(def.args ?? [])}`, `default_tools_approval_mode = "approve"`, ``);
+    const env = Object.entries(def.env ?? {}).filter(([, v]) => v !== "");
+    if (env.length) out.push(`[mcp_servers.${key}.env]`, ...env.map(([k, v]) => `${k} = ${JSON.stringify(String(v))}`), ``);
+  }
+  return out.join("\n");
+}
+
+function makeIsolatedCodexHome(safefsEnv: Record<string, string>, agentMcpServers?: string[]): IsolatedHome {
   if (!existsSync(USER_AUTH)) {
     throw new Error(
       "Codex CLI 인증 필요. 터미널에서 `codex login` 실행 부탁드립니다. " +
@@ -108,29 +191,37 @@ function makeIsolatedCodexHome(safefsEnv: Record<string, string>): IsolatedHome 
     `sandbox_mode = "workspace-write"`,
     ``,
     `[sandbox_workspace_write]`,
-    `writable_roots = [${(safefsEnv.MCP_WRITE_PATHS || "")
-      .split(",")
-      .filter(Boolean)
-      .map((w) => {
-        const cleaned = w.replace(/^\//, "").replace(/\/?\*\*$/, "");
-        return JSON.stringify(join(PROJECT_SELF_DIR, cleaned));
-      })
-      .join(", ")}]`,
+    `writable_roots = [${codexWritableRoots((safefsEnv.MCP_WRITE_PATHS || "").split(",").filter(Boolean)).map((r) => JSON.stringify(r)).join(", ")}]`,
     ``,
     `[mcp_servers.safefs]`,
     `command = ${JSON.stringify(TSX_BIN)}`,
     `args = ${argsJson}`,
+    // [2026-09-28] codex 0.144.5 exec는 approval_policy="never"여도 MCP 도구 호출을 승인 대상으로 보고 자동 취소한다
+    // ("user cancelled MCP tool call"). 허용 목록·승인은 safefs가 자체 수행하므로 이 서버 도구는 codex 단에서 자동 승인.
+    `default_tools_approval_mode = "approve"`,
     ``,
     `[mcp_servers.safefs.env]`,
     envLines,
     ``,
   ].join("\n");
-  writeFileSync(join(home, "config.toml"), toml, "utf-8");
+  // 에이전트에 할당된 MCP 서버(allow 모드)도 싣는다. approval 모드는 비대화형에서 승인 불가라 제외하고 기록만 남긴다.
+  let fullToml = toml;
+  if (agentMcpServers?.length) {
+    const r = resolveAgentMcpServers(agentMcpServers);
+    fullToml = toml + "\n" + renderCodexMcpServers(r.servers, r.allowNames);
+    if (r.approvalNames.length) console.log(`[codex] approval 모드 MCP는 codex에 싣지 않음: ${r.approvalNames.join(", ")}`);
+  }
+  writeFileSync(join(home, "config.toml"), fullToml, { encoding: "utf-8", mode: 0o600 });
+  try { chmodSync(join(home, "config.toml"), 0o600); } catch { /* */ }
   // [디버그 2026-07-18] 마지막 생성 설정 사본 (문제 진단용 — 안정화 후 제거 가능)
   try { writeFileSync(join(MYCREW_HOME, "history", ".codex-homes", "last-config.toml"), toml, "utf-8"); } catch { /* */ }
   return {
     home,
     cleanup: () => {
+      try {
+        const r = syncBackCodexAuth(targetAuth, USER_AUTH);
+        if (r === "updated") console.log("[codex] 잡 중 갱신된 인증을 ~/.codex/auth.json에 반영");
+      } catch (e) { console.error("[codex] 인증 되돌려쓰기 실패:", e); }
       try { rmSync(home, { recursive: true, force: true }); } catch { /* */ }
     },
   };
@@ -209,7 +300,9 @@ function spawnCodex(
         const usage = event.usage as Record<string, unknown> | undefined;
         if (usage && typeof usage === "object") {
           cost = {
+            // 구독제라 달러를 모른다 — $0을 «무료»로 집계하지 않게 산정 방식을 명시한다(cost-ledger.ts).
             costUsd: 0,
+            costMethod: "unpriced",
             inputTokens: Number(usage.input_tokens ?? 0),
             outputTokens: Number(usage.output_tokens ?? 0),
             cacheReadTokens: Number(usage.cached_input_tokens ?? 0),
@@ -285,7 +378,7 @@ export const codexCliAdapter: AgentAdapter = {
 
     let isolated: IsolatedHome;
     try {
-      isolated = makeIsolatedCodexHome(safefsEnv);
+      isolated = makeIsolatedCodexHome(safefsEnv, config.mcpServers);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
@@ -304,8 +397,7 @@ export const codexCliAdapter: AgentAdapter = {
       "--skip-git-repo-check",
     ];
     if (config.writePaths) {
-      for (const p of config.writePaths) {
-        const abs = p.startsWith("/") ? join(PROJECT_SELF_DIR, p.replace(/^\//, "")) : p;
+      for (const abs of codexWritableRoots(config.writePaths.filter((p) => p.startsWith("/")))) {
         args.push("--add-dir", abs);
       }
     }

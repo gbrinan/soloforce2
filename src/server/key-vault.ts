@@ -82,6 +82,9 @@ export function getKeyRawValue(id: string): string | null {
 export function saveServerKey(id: string, value: string): void {
   const def = PRESET_KEYS.find((k) => k.id === id);
   if (!def || def.scope !== "server" || !def.envName) return;
+  // (2026-10-02) 앤트로픽 유료 API 키는 서버 환경에 저장하지 않는다 — 워커는 구독(OAuth)만 쓴다.
+  // 저장되면 전체 env를 상속하는 경로에서 claude가 PAYG 크레딧을 소모할 수 있다.
+  if (def.envName === "ANTHROPIC_API_KEY") throw new Error("Anthropic API 키는 저장할 수 없습니다(구독 인증만 사용)");
   writeEnvKey(def.envName, value);
   process.env[def.envName] = value;
 }

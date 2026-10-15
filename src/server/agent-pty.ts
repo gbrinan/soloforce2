@@ -14,6 +14,7 @@ import * as pty from "node-pty";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isOAuthExpiredError } from "../claude-error-retry.js";
 import { IS_WIN, safeKill } from "./utils/platform.js";
 
 /**
@@ -170,6 +171,14 @@ export class AgentPty {
         this.buf = this.buf.slice(-REPLAY_BUFFER_MAX);
       }
       this.opts.onData?.(data);
+      if (this.awaiter && isOAuthExpiredError(this.buf)) {
+        const a = this.awaiter;
+        this.awaiter = null;
+        clearTimeout(a.timer);
+        this.clearStuckTimer();
+        this.resetIdleTimer();
+        a.reject(new Error("Failed to authenticate. API Error: 401 OAuth access token has expired."));
+      }
     });
 
     proc.onExit(({ exitCode }) => {

@@ -31,6 +31,7 @@ import { computeMemoryDir } from "../mcp/memory-dir.js";
 import { archiveChatMessage } from "./audit.js";
 import { emitGlobalEvent } from "./jobs.js";
 import { getUserTitle } from "./user-title.js";
+import { retryOnceOnOAuthExpiration } from "../claude-error-retry.js";
 
 // ── 모듈 상태 ────────────────────────────────────────────────────────────────
 let wss: WebSocketServer | null = null;
@@ -398,7 +399,13 @@ export async function ensurePtyReady(): Promise<void> {
 }
 
 export async function submitFromChat(text: string): Promise<string> {
-  return geniePty.submitPrompt(text);
+  return retryOnceOnOAuthExpiration(
+    () => geniePty.submitPrompt(text),
+    async () => {
+      console.warn("[Terminal] OAuth 만료 감지 — 마이크루 PTY를 새 세션으로 1회 재시도");
+      await ptyRespawnForReset();
+    },
+  );
 }
 
 /** 터미널을 실제로 보고 있는 뷰어가 있는지 (WebSocket 연결 수). */

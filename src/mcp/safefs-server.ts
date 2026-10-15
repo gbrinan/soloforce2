@@ -17,6 +17,7 @@ import { dirname, basename, join, resolve as pathResolve } from "node:path";
 import { homedir } from "node:os";
 import { configurePathMatcher, matchesAllowList } from "./path-matcher.js";
 import { SENSITIVE_PATHS } from "./sensitive-paths.js";
+import { withoutAnthropicKeys } from "../server/utils/safeChildEnv.js";
 // SENSITIVE_PATHS — 코드 고정 deny-list. 직원 env(MCP_*_SENSITIVE) 누락/오주입에도 무조건 차단.
 
 const WRITE_PATHS = (process.env.MCP_WRITE_PATHS || "")
@@ -53,7 +54,9 @@ const JOB_ID = process.env.MCP_JOB_ID || undefined;
 // 그 외 패턴(src/, tmp/, package.json 등)은 CWD 기준 유지.
 // universal 패턴(/**, /*)은 양쪽 군에 모두 포함되어 잭키 readPaths=["/**"] 같은 케이스 보존.
 // 멀티 인스턴스: MYCREW_HOME=.mycrew-B 일 때 자기 인스턴스 history만 매칭, 다른 인스턴스 차단.
-const SELF_PATH_PREFIXES = ["history/outputs/", "history/agents/", "history/external/"];
+// history/ 전체를 데이터 루트(MYCREW_HOME)로 본다. 코드(릴리스)와 데이터가 분리된 배치(WSL, 2026-09-08~)에서
+// outputs·agents·external만 넘기면 history/skills·cost-log·conversations 등이 코드 폴더에서 찾아져 "no matches"가 된다.
+const SELF_PATH_PREFIXES = ["history/"];
 function isSelfPattern(p: string): boolean {
   const n = p.replace(/^\//, "");
   return SELF_PATH_PREFIXES.some((pre) => n.startsWith(pre));
@@ -673,7 +676,7 @@ if (BASH_ENABLED) {
           timeout: timeout ?? 120_000,
           maxBuffer: 10 * 1024 * 1024,
           encoding: "utf-8",
-          env: { ...process.env, PATH: process.env.PATH },
+          env: withoutAnthropicKeys({ ...process.env, PATH: process.env.PATH }),
         });
         return {
           content: [{

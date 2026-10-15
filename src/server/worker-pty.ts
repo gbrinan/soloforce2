@@ -31,7 +31,7 @@ import { extractAndLogCost } from "./cost-extractor.js";
 import type { AgentConfig, AgentResult } from "../types.js";
 import { effortForConfig } from "./effort-policy.js";
 import { getUserTitle } from "./user-title.js";
-import { OVERLOAD_BACKOFFS_MS, isApiOverloadError, sleep, withJitter } from "../claude-error-retry.js";
+import { OVERLOAD_BACKOFFS_MS, isApiOverloadError, retryOnceOnOAuthExpiration, sleep, withJitter } from "../claude-error-retry.js";
 
 const wikiJobs = new Map<string, string>();
 const wikiGrants = new Map<string, ReturnType<typeof issueWikiWorkerAccess>>();
@@ -211,7 +211,15 @@ export async function runInteractiveWorker(
     const submitStart = Date.now();
     let output: string;
     try {
-      output = await pty.submitPrompt(prompt);
+      output = await retryOnceOnOAuthExpiration(
+        () => pty.submitPrompt(prompt),
+        async () => {
+          console.warn(`[Worker:${config.role}] OAuth 만료 감지 — 새 세션으로 1회 재시도`);
+          resetWorker(config.role);
+          pty = getWorkerPty(config);
+          await pty.ensureReady();
+        },
+      );
     } catch (err) {
       // 좀비/소켓끊김 자동복구 — agent_pty_busy 인데 isHealthy=false면 PTY 사망 의심.
       // 1회 한정 reset+재시도 (무한루프 차단).

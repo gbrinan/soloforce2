@@ -209,8 +209,10 @@ export const antigravityCliAdapter: AgentAdapter = {
         const output = parsed.response ?? stdout.trim();
         const durationMs = Date.now() - startTime;
         
+        // 구독제라 달러를 모른다 — 두 분기 모두 산정 방식을 unpriced 로 명시한다(cost-ledger.ts).
         const cost: AgentResult["cost"] = parsed.stats ? {
           costUsd: 0,
+          costMethod: "unpriced",
           inputTokens: parsed.stats.input_tokens ?? 0,
           outputTokens: parsed.stats.output_tokens ?? 0,
           cacheReadTokens: 0,
@@ -219,6 +221,7 @@ export const antigravityCliAdapter: AgentAdapter = {
           model: modelId,
         } : {
           costUsd: 0,
+          costMethod: "unpriced",
           inputTokens: estimateTokens(prompt),
           outputTokens: estimateTokens(output),
           cacheReadTokens: 0,

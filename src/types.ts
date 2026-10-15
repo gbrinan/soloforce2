@@ -5,6 +5,8 @@ export interface AgentConfig {
   name: string;
   systemPrompt: string;
   allowedTools: string[];
+  /** 도구 없이 텍스트만 생성하는 내부 유틸(요약·메모리 플러시 등). 도구 0 가드를 명시적으로 면제한다. */
+  textOnly?: boolean;
   maxTurns: number;
   readPaths?: string[];
   writePaths?: string[];
@@ -58,6 +60,8 @@ export interface AgentCost {
   cacheCreateTokens: number;
   durationMs: number;
   model?: string;
+  /** costUsd 산정 방식(cli | session-delta | tokens | unpriced). 2026-10-02 이전 행에는 없다. 등급 해석은 cost-ledger.ts. */
+  costMethod?: string;
 }
 
 export interface AgentResult {
@@ -108,6 +112,7 @@ export interface Job {
   leaseUntilMs?: number;
   selfRestart?: boolean;
   skipPlanGate?: boolean;
+  skipOutput?: boolean;
   leaseSec?: number;
   maxTurns?: number;
   outputFiles?: string[];

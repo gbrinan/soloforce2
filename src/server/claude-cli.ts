@@ -147,10 +147,24 @@ export async function installClaudeCli(timeoutMs = 300_000): Promise<ClaudeInsta
 
 export interface ClaudeRunResult { ok: boolean; text?: string; error?: string }
 
-export function runClaude(prompt: string, system = "", model = "", timeoutMs = 120_000): Promise<ClaudeRunResult> {
+export interface ClaudeRunOptions {
+  readonly system?: string;
+  readonly model?: string;
+  readonly timeoutMs?: number;
+  readonly allowedTools?: readonly string[];
+}
+
+export function buildClaudeArgs(prompt: string, options: ClaudeRunOptions = {}): string[] {
   const args = ["-p", prompt];
-  if (system.trim()) args.push("--append-system-prompt", system);
-  if (model.trim()) args.push("--model", model);
+  if (options.system?.trim()) args.push("--append-system-prompt", options.system);
+  if (options.model?.trim()) args.push("--model", options.model);
+  if (options.allowedTools?.length) args.push("--allowedTools", ...options.allowedTools);
+  return args;
+}
+
+export function runClaude(prompt: string, options: ClaudeRunOptions = {}): Promise<ClaudeRunResult> {
+  const args = buildClaudeArgs(prompt, options);
+  const timeoutMs = options.timeoutMs ?? 120_000;
   return new Promise<ClaudeRunResult>((resolve) => {
     let proc: ReturnType<typeof spawn>;
     try {

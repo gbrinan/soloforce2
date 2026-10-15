@@ -9,13 +9,14 @@
 import { randomUUID } from "node:crypto";
 import { basename, join, isAbsolute } from "node:path";
 import { statSync } from "node:fs";
-import { resolveExistingArtifact } from "./utils/path-normalize.js";
+import { resolveArtifactAcrossBases } from "./utils/path-normalize.js";
 import { ARTIFACT_EXT, EXT_BOUNDARY } from "./utils/artifact-ext.js";
 import type { Job } from "../types.js";
 import { PROJECT_SELF_DIR } from "../config.js";
 import { addGenieMessage, isSelfRestartPending } from "./chat.js";
 import { getWorkerAgent } from "../agent-registry.js";
 import { isQaFailVerdict } from "./qa-verdict.js";
+import { recordQaRunOutcome } from "./qa-run-failure.js";
 import type { TrajectoryVerdict } from "./trajectory-judge.js";
 
 export type QaVerdict = "pass" | "fail" | "unknown";
@@ -124,8 +125,9 @@ export function precheckArtifacts(
     const zeroBaseDir = job.cwd || PROJECT_SELF_DIR;
     const missing: string[] = [];
     for (const rp of required) {
-      const fp = isAbsolute(rp) ? rp : join(zeroBaseDir, rp);
-      if (!resolveExistingArtifact(fp, rp, zeroBaseDir)) missing.push(rp);
+      // 코드 루트·데이터 루트(MYCREW_HOME) 양쪽 해석 — 단일 베이스는 분리 인스턴스에서
+      // 상대경로 산출물 전량을 유령으로 판정한다(상세: resolveArtifactAcrossBases 주석).
+      if (!resolveArtifactAcrossBases(rp, zeroBaseDir)) missing.push(rp);
     }
     // 요구 산출물이 하나라도 실존하면 저장은 된 것(워커가 경로 라벨을 안 적었을 뿐) → PASS.
     // 전부 미존재면 회피 보고로 간주 → FAIL.
@@ -148,12 +150,13 @@ export function precheckArtifacts(
     // 경로 해석: 절대 경로면 그대로, 상대 경로면 job.cwd 기준
     // (mycrew-photos 등 외부 프로젝트 작업 시 올바른 경로에서 검증)
     const baseDir = job.cwd || PROJECT_SELF_DIR;
-    const fullPath = isAbsolute(path) ? path : join(baseDir, path);
 
-    // 존재 검증 (NFC/NFD·bare 파일명 오탐 방지 폴백 포함)
-    const resolvedPath = resolveExistingArtifact(fullPath, path, baseDir);
+    // 존재 검증 (NFC/NFD·bare 파일명 오탐 방지 폴백 + 코드/데이터 루트 양 베이스)
+    const resolvedPath = resolveArtifactAcrossBases(path, baseDir);
     if (!resolvedPath) {
-      failures.push(`파일 미존재: ${path} (검증 경로: ${fullPath})`);
+      // 진단 문구에는 1차 베이스 후보를 남긴다. 실제로는 MYCREW_HOME까지 조회한 뒤의 미존재다.
+      const fullPath = isAbsolute(path) ? path : join(baseDir, path);
+      failures.push(`파일 미존재: ${path} (검증 경로: ${fullPath}, MYCREW_HOME 폴백 포함)`);
       continue;
     }
     
@@ -244,10 +247,51 @@ function handlePassVerdict(job: Job, cycleInfo: CycleInfo | null): void {
   }
 }
 
+/** QA 요청문에서 검증 대상 원작업의 제목 한 줄을 뽑는다(알림용). */
+function qaOriginalTitle(request: string): string {
+  const body = request.split(/##\s*원본 (?:요청|QA 대상)/)[1] ?? request;
+  const line = body.split("\n").map((l) => l.trim())
+    .find((l) => l && !/^\*\*\[루프 정책\]|^\[?(자동 QA|QA 자동)|^<!--|^워커\(|^#/.test(l)) ?? request.split("\n")[0];
+  return line.replace(/\*\*/g, "").slice(0, 80);
+}
+
+/**
+ * "보류" 판정 — 환경(권한·도구·연결) 문제로 QA가 검증 자체를 못 한 경우(2026-09-28).
+ * 합격 처리(조건부 포함)하면 작업이 검증된 것처럼 보이고, 불합격 처리하면 워커에게 무의미한 핫픽스가 간다.
+ * 보류는 둘 다 하지 않고 아난에게 할 일(보고서의 "아난이 할 일" 줄)만 알린다.
+ */
+export function detectQaHold(text: string): { hold: boolean; todo: string } {
+  const all = [...text.matchAll(/종합\s*판정\s*[—–\-]\s*\*\*(보류|합격|불합격|조건부\s*합격)/g)];
+  const last = all[all.length - 1];
+  if (!last || last[1] !== "보류") return { hold: false, todo: "" };
+  const todo = (text.match(/아난이 할 일\s*[:：]\s*([^\r\n]+)/) || [])[1] || "";
+  return { hold: true, todo: todo.replace(/\*\*/g, "").trim() };
+}
+
 export function handleQaJobComplete(job: Job): void {
   if (job.agent !== "qa") return;
-  // completed만 처리 (failed/timeout은 무시 — QA 실행 자체 실패)
-  if (job.status !== "completed") return;
+  // QA 실행 자체 실패도 버리지 않는다 — 원인을 분류하고 연속 실패면 사람에게 알린다.
+  // (2026-09-19~26 codex 인증 실패로 QA 23건이 무알림 실패 → 원작업이 검증 없이 끝난 사고)
+  const runOutcome = recordQaRunOutcome(job.status, job.logs ?? [], qaOriginalTitle(job.request));
+  if (job.status !== "completed") {
+    if (runOutcome) {
+      console.warn(`[QA-AutoJudge] QA 실행 실패(${runOutcome.info.cause}) job=${job.id.slice(0, 8)}: ${runOutcome.info.evidence}`);
+      if (runOutcome.alert) addGenieMessage(runOutcome.alert);
+    }
+    return;
+  }
+
+  // 보류: 환경 문제로 검증 불가 — 합격·핫픽스 어느 쪽으로도 보내지 않고 아난에게 알린다(2026-09-28).
+  const holdText = [job.fullResult ?? "", ...(job.logs ?? [])].join(String.fromCharCode(10));
+  const hold = detectQaHold(holdText);
+  if (hold.hold) {
+    const title = qaOriginalTitle(job.request);
+    addGenieMessage(`[자동 판정] ⏸ QA 보류 — 환경 문제로 검증하지 못했습니다(합격 처리 안 함, 핫픽스 안 보냄).
+작업: ${title}
+아난이 할 일: ${hold.todo || "보고서 확인"}`);
+    console.log(`[QA-AutoJudge] 보류 job=${job.id.slice(0, 8)}: ${hold.todo}`);
+    return;
+  }
 
   const verdict = detectQaVerdict(job.logs);
   const cycleInfo = extractCycleInfo(job.request);

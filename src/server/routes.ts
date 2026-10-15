@@ -877,6 +877,7 @@ export function registerRoutes(app: Hono): void {
       body.maxTurns,
       todo.id,
       body.effort,
+      body.skipOutput !== false,
     );
     setJobTaskMeta(job.id, task.id, task.instruction);
     // ACK 페이로드
@@ -918,6 +919,7 @@ export function registerRoutes(app: Hono): void {
       leaseSec?: number;
       maxTurns?: number;
       selfRestart?: boolean;
+      skipOutput?: boolean;
       taskId?: string;
       taskTitle?: string;
       effort?: string;
@@ -2090,7 +2092,10 @@ export function registerRoutes(app: Hono): void {
     const body = await c.req.json().catch(() => null) as { prompt?: string; system?: string; model?: string } | null;
     if (!body?.prompt?.trim()) return c.json({ ok: false, error: "prompt required" }, 400);
     if (body.prompt.length > 50_000) return c.json({ ok: false, error: "prompt too long (>50k)" }, 413);
-    const result = await runClaude(body.prompt, body.system ?? "", body.model ?? "");
+    const result = await runClaude(body.prompt, {
+      system: body.system,
+      model: body.model,
+    });
     return c.json(result);
   });
 

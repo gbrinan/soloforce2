@@ -28,6 +28,17 @@ const DRAFT_ONLY_NOTICE =
   "외부 발신·전송은 아래 스텝 지시가 명시적으로 요구한 대상·채널·수단에 한해서만 수행하고, " +
   "그 밖의 임의 발신·수신자 추가·범위 확대는 금지. 그 외 산출물은 초안으로만 저장.**";
 
+export function classifyTerminalLoopJob(
+  status: "completed" | "outputs_missing" | "failed",
+  error?: string,
+): { exitReason: "done" | "error"; error?: string } {
+  if (status === "failed") return { exitReason: "error", error: error || "job 실패" };
+  if (status === "outputs_missing") {
+    return { exitReason: "error", error: error || "outputs_missing: 보고 형식 누락(실행 실패 가능성)" };
+  }
+  return { exitReason: "done" };
+}
+
 function modelTierGuidance(tier?: LoopStep["model_tier"]): string {
   if (!tier) return "";
   const label = tier === "cheap" ? "저비용/경량" : tier === "frontier" ? "최고 성능" : "표준";
@@ -167,10 +178,8 @@ async function runTaskStep(
     const job = getJob(jobId);
     if (!job) return { jobIds: [jobId], exitReason: "error", error: "job을 찾을 수 없음" };
     if (TERMINAL_STATUSES.has(job.status)) {
-      if (job.status === "failed") {
-        return { jobIds: [jobId], exitReason: "error", error: job.error || "job 실패" };
-      }
-      return { jobIds: [jobId], exitReason: "done" };
+      const outcome = classifyTerminalLoopJob(job.status as "completed" | "outputs_missing" | "failed", job.error);
+      return { jobIds: [jobId], ...outcome };
     }
     const midCheck = checkMidRun(def, sumRunCost([jobId]), startedAtMs);
     if (!midCheck.ok) {

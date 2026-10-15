@@ -19,3 +19,11 @@
 - Windows 사용자는 main을 fast-forward로 갱신하거나 소스 ZIP을 새 폴더에 풀고 해당 OS에서 npm 의존성을 설치·빌드한다. [Windows 절차](../README-WINDOWS.md).
 
 실제 Windows 접속·서비스 재시작, Drive 쓰기, 일반 직원의 Wiki MCP 자동 인계는 이 Mac 실호출 검증에 포함하지 않는다. 적용 조건의 완전성은 모델 프롬프트만으로 보장되지 않으므로 의미 검토 단계를 유지한다.
+
+## Windows 운영 후속 검사
+
+2026-09-15 KST Windows 호스트의 WSL2 운영 인스턴스에서 별도로 확인했다. QA 직원의 `bwrap: loopback: Failed to create NETLINK_ROUTE socket` 오류는 Soloforce2 API 응답이나 Git·TypeScript 실패가 아니라 해당 Claude 세션의 격리 셸 초기화 실패였다. 호스트에서 같은 대상에 대해 Git 상태 조회, `node node_modules/typescript/bin/tsc --noEmit`, `/api/health`를 직접 실행해 각각 성공 여부를 판정한다. 격리 셸 실패를 제품 실패 또는 인증 실패로 변환하지 않는다.
+
+`outputs_missing`을 루프 성공으로 접던 경로는 오류로 바꾼다. `completed`는 계속 `done`, `failed`와 `outputs_missing`은 `error`여야 한다. OAuth 401 본문이 보고 마커 없이 끝난 경우에도 루프가 성공으로 기록되지 않아야 한다.
+
+systemd 운영에서는 자체 재시작이 detached 자식 프로세스를 만든 뒤 정상 종료하면 unit이 정지할 수 있다. `INVOCATION_ID` 또는 `JOURNAL_STREAM`이 있는 프로세스는 종료 코드 75로 supervisor에 재시작을 맡기고, 직접 실행한 프로세스만 기존 detached 재시작을 사용한다. 릴리즈 판정은 빌드 성공만으로 끝내지 않고, 재시작 뒤 unit의 active 상태와 `/api/health` 응답을 함께 확인한다.

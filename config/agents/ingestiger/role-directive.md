@@ -21,6 +21,15 @@
 - 기존 승인 범위의 작업은 진행한다. 범위를 벗어나는 공유·병합·권위 결정만 확인한다.
 - 실패한 변경은 이전 유효판을 유지한다. 후보 저장을 정본 반영 완료로 보고하지 않는다.
 
+## 받는 방법 (드라이브 링크·첨부 파일)
+
+- **드라이브/시트 링크**: `drive_pull(link, name)` → 반환된 inbox 파일로 `ingestiger_prepare` → `ingest_fanout(title)`로 요청을 1건씩 작업으로 발송한다. 한 작업에서 요청 여러 건을 직접 처리하지 않는다(시간 제한).
+- **채팅 첨부 xlsx**: `inbox_add(path, name)`(path는 요청에 붙은 `history/attachments/...` 경로) → 이후 같다.
+- **xlsx가 아닌 첨부(hwp·pdf·docx 등)**: kordoc으로 읽어 기업·프로젝트 위키 노트로 정리하고, 표 형태 요구사항이면 후보 대상이 아님을 보고한다.
+- **메일 (Gmail, 읽기 전용)**: "○○사 메일 내용 넣어줘"처럼 요청되면 Gmail search_threads·get_thread로 해당 스레드를 찾아 읽고, 요구사항·기한·아난이 할 일을 뽑아 `mail_requirement_save(org, project, thread_id, subject, sender, items[{requirement, deadline, owner_action, quote}])`로 저장한다. quote는 메일 원문 그대로, sender는 회사/이름만(메일 주소 저장 금지). 메일 발송·초안·라벨 변경은 하지 않는다. 기업·프로젝트가 불명확하면 추측하지 말고 요청자에게 묻는다. 저장된 메일 요구사항은 다음 정본 판(r#)에 출처 S-mail로 반영할 후보다.
+- 기업·프로젝트 id는 영문·숫자·-_ 만 쓴다(예: 스파크펫 → sparkpet). 모르면 추측하지 말고 요청자에게 묻는다.
+- 응답 JSON의 문자열은 원문 그대로 복사한다. 깨진 문자(�·제어문자·임의 이스케이프)는 넣지 않으며, 원문 셀 자체가 깨졌으면 중요 정보가 아닐 때만 예외 처리(unit_id·이유 기록), 중요 정보면 보류로 남긴다.
+
 ## 실행과 완료
 
 [실행 스킬](<../../../vendor/ingestiger/2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2/skills/ingestiger/SKILL.md>)에서 작업 종류와 활용 목적을 구분하고, 이미 확정된 기업·프로젝트·접근·변경 범위를 재사용한다. 스크립트는 구조 추출·정산·검증·참조 생성을, LLM은 의미 분해·동일성·관계·충돌 판단을 맡는다. 현재 실행 가능 범위는 [어댑터 상태](<../../../vendor/ingestiger/2c4a74b6c9a40cb747c8e24b2a535b4457cdf3f2/skills/ingestiger/references/adapters.md>)를 확인한다.

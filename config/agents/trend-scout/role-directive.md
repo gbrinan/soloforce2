@@ -33,7 +33,7 @@ Hacker News, GitHub 이슈/PR, Polymarket 예측시장)을 수집하고, 업보�
 
 그 다음 SafeBash로 실행 (--plan에 **파일 경로**를 넘긴다):
 ```
-C:/Users/user/AppData/Local/Programs/Python/Python313/python.exe vendor/last30days/scripts/last30days.py "주제" --days=30 --emit=compact --plan history/outputs/trend-scout/plan.json
+python3 vendor/last30days/scripts/last30days.py "주제" --days=30 --emit=compact --plan history/outputs/trend-scout/plan.json
 ```
 - 인터프리터 절대경로·JSON을 파일로 넘기는 이유·1회 재시도 원칙은 `config/guides/script-execution.md`. 위 명령을 그대로 쓴다.
 - 속보성 주제는 --days=7, 기본은 --days=30

@@ -22,20 +22,16 @@
       ]
     },
     "kordoc": {
-      "command": "cmd",
+      "command": "npx",
       "args": [
-        "/c",
-        "npx",
         "-y",
         "kordoc",
         "mcp"
       ]
     },
     "supabase": {
-      "command": "cmd",
+      "command": "npx",
       "args": [
-        "/c",
-        "npx",
         "-y",
         "@supabase/mcp-server-supabase@latest",
         "--project-ref=jditahiwwhrugzyamecl"

@@ -6,21 +6,10 @@ import { join } from "node:path";
 import { computeMemoryDir } from "../mcp/memory-dir.js";
 import { PROJECT_SELF_DIR } from "../config.js";
 import { logCost } from "./jobs.js";
+import { priceForModel } from "./invocation-cost.js";
 
-// 모델별 가격 ($ / 1M tokens). 참고용 누적이라 표준 티어 가격만.
-// 누락된 모델은 fallback (Opus 4.7) 적용.
-const PRICES: Record<string, { input: number; output: number; cache5m: number; cache1h: number; cacheRead: number }> = {
-  // 2026-07-17: 현역 모델 추가 — 누락 시 폴백(Opus 단가)이 적용돼 sonnet-5 비용이 ~5배 과대 기록되고
-  // 주간 비용 리포트·루프 예산 판단이 전부 오염된다. 신모델 도입 시 이 표 갱신 필수.
-  "claude-opus-4-8":       { input: 15,  output: 75, cache5m: 18.75, cache1h: 30,    cacheRead: 1.50 },
-  "claude-sonnet-5":       { input: 3,   output: 15, cache5m: 3.75,  cache1h: 6,     cacheRead: 0.30 },
-  "claude-fable-5":        { input: 15,  output: 75, cache5m: 18.75, cache1h: 30,    cacheRead: 1.50 },
-  "claude-opus-4-7":       { input: 15,  output: 75, cache5m: 18.75, cache1h: 30,    cacheRead: 1.50 },
-  "claude-opus-4-6":       { input: 15,  output: 75, cache5m: 18.75, cache1h: 30,    cacheRead: 1.50 },
-  "claude-sonnet-4-6":     { input: 3,   output: 15, cache5m: 3.75,  cache1h: 6,     cacheRead: 0.30 },
-  "claude-haiku-4-5":      { input: 1,   output: 5,  cache5m: 1.25,  cache1h: 2,     cacheRead: 0.10 },
-};
-const FALLBACK_PRICE = PRICES["claude-opus-4-7"];
+// 단가는 invocation-cost.ts 한 곳에만 둔다. 이 파일의 별도 단가표는 2026-10-07에 정본과 어긋나 있어 제거했다
+// (opus $15/$75 등 구세대 단가). 5분 TTL 캐시 생성 단가는 입력 단가의 1.25배.
 
 const TAIL_BYTES = 64 * 1024;
 
@@ -79,16 +68,16 @@ function collectLatestPromptUsage(tail: string): AsstUsage | null {
 }
 
 function computeCostUsd(u: AsstUsage): number {
-  const p = PRICES[u.model] ?? FALLBACK_PRICE;
-  // cache_creation_input_tokens 가 5m+1h 합과 다를 수 있으면 breakdown 우선, 없으면 5m 가정
+  const p = priceForModel(u.model);
+  // cache_creation_input_tokens 가 5m+1h 합과 다를 수 있으면 breakdown 우선, 없으면 1h 가정(CLI 실측과 일치)
   const breakdownSum = u.cache5m + u.cache1h;
-  const cache5mUsed = breakdownSum > 0 ? u.cache5m : u.cacheCreate;
-  const cache1hUsed = breakdownSum > 0 ? u.cache1h : 0;
+  const cache5mUsed = breakdownSum > 0 ? u.cache5m : 0;
+  const cache1hUsed = breakdownSum > 0 ? u.cache1h : u.cacheCreate;
   const usd =
-    (u.input      * p.input      +
-     u.output     * p.output     +
-     cache5mUsed  * p.cache5m    +
-     cache1hUsed  * p.cache1h    +
+    (u.input      * p.input        +
+     u.output     * p.output       +
+     cache5mUsed  * p.input * 1.25 +
+     cache1hUsed  * p.cacheWrite   +
      u.cacheRead  * p.cacheRead) / 1_000_000;
   return usd;
 }

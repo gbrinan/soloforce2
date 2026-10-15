@@ -11,7 +11,7 @@ import {
   UpstreamLimitError,
   MAX_DEFERRALS,
 } from "./upstream-limit.js";
-import { formatArtifactListForHandoff, formatQaTargetsWithStamp } from "./utils/path-normalize.js";
+import { formatArtifactListForHandoff, formatQaTargetsWithStamp, isArtifactModifiedSince } from "./utils/path-normalize.js";
 import { join, basename, dirname, isAbsolute, resolve as pathResolve } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import type { AgentConfig, AgentResult, AgentCost, Job, JobStatus } from "../types.js";
@@ -62,11 +62,13 @@ import { isSelectiveRecallEnabled, getRecallBudgetChars, buildWikiIndex, buildTo
 import { recordJobMetric } from "./metrics.js";
 import { resolveTier, escalateTier } from "./model-tiers.js";
 import { planStageModel } from "./worker-stage-model.js";
-import { decideQa, newCodeChanges } from "./qa-trigger-policy.js";
+import { decideQa, newCodeChanges, pickQaModel } from "./qa-trigger-policy.js";
+import { selectQaReview, qaVerificationInstructions } from "./qa-review-plan.js";
 import { resolveEffort, normalizeEffort } from "./effort-policy.js";
 import { buildCostEntry } from "./cost-entry.js";
 import type { ModelTier } from "./loops/types.js";
 
+import { withoutAnthropicKeys } from "./utils/safeChildEnv.js";
 const folderName = basename(PROJECT_SELF_DIR);
 const SELF_NAMES = new Set(["self", folderName, folderName.toLowerCase()]);
 
@@ -659,7 +661,13 @@ export function checkExpiredLeases(): number {
       acquiredAt: new Date(lease.acquiredAt).toISOString(),
     });
     leases.delete(agentId);
-    if (job && job.status === "running") {
+    // 2026-10-04: 게이트를 "running"에서 «비종결 전체»로 확장.
+    // 구 게이트는 planning·awaiting_approval 상태의 잡을 회수 대상에서 제외했고,
+    // 위에서 leases.delete가 이미 실행되므로 그 잡은 두 번 다시 이 루프에 들어오지 못했다.
+    // → 프로세스는 죽었는데 상태는 활성(planning)으로 영구 잔류하는 좀비가 생기고,
+    //   scheduler의 ACTIVE_JOB_STATUSES가 planning을 활성으로 세기 때문에
+    //   QA 자동 사이클이 "핫픽스 잡이 아직 running" FAIL을 무한 반복했다(실측 6라운드+).
+    if (job && !TERMINAL_JOB_STATUSES.has(job.status)) {
       // 자동 회수: outputs baseline diff로 산출물 작성 여부 확인 (lease 만료 직전 새 보고서 = 워커가 작업 마쳤지만 종료 신호 못 보낸 케이스)
       const recovery = checkOutputsRecovered(job, agentId);
       if (recovery.recovered) {
@@ -834,6 +842,7 @@ export function createJob(
   maxTurns?: number,
   todoId?: string,
   effort?: string,
+  skipOutput?: boolean,
 ): Job {
   agent = agent ? resolveNewWorkerId(agent) : undefined;
   stageAgents = stageAgents?.map(resolveNewWorkerId);
@@ -865,6 +874,7 @@ export function createJob(
     genieTurnId: getGenieTurnId() || undefined, // 마이크루 턴 중 생성 시에만 값 있음
     selfRestart,
     skipPlanGate,
+    skipOutput,
     ...(leaseSec !== undefined && leaseSec > 0 ? { leaseSec } : {}),
     ...(maxTurns !== undefined && maxTurns > 0 ? { maxTurns } : {}),
     // 모르는 값은 싣지 않는다 — 저장해 두면 나중에 "지정했는데 왜 안 먹지"로 오진된다.
@@ -1271,7 +1281,7 @@ async function execBash(cmd: string, cwd?: string, timeoutMs = 60000): Promise<s
       // CLAUDE_BIN_DIR이 직전 PATH 항목 꼬리에 붙어버렸고(예: "...\System32:C:\...\bin"),
       // 그 결과 post-validation 명령이 claude 바이너리를 영영 못 찾았다.
       // agent.ts:572·terminal-ws.ts:199·worker-pty.ts:145는 이미 플랫폼 분기를 쓰고 있다.
-      env: { ...process.env, PATH: `${process.env.PATH ?? ""}${process.platform === "win32" ? ";" : ":"}${CLAUDE_BIN_DIR}` },
+      env: withoutAnthropicKeys({ ...process.env, PATH: `${process.env.PATH ?? ""}${process.platform === "win32" ? ";" : ":"}${CLAUDE_BIN_DIR}` }),
     }, (error, stdout, stderr) => {
       if (error) {
         resolve(`[에러] ${stderr || error.message}`);
@@ -1873,7 +1883,7 @@ async function runPlanApprovalGate(
     }
     console.log(`[Plan] 계획 수립 시도 ${attempt}/${MAX_PLAN_ATTEMPTS}`);
 
-    let planResult = await adapter.execute(planConfig, `${agentId}-plan`, planPrompt, {
+    let planResult = await adapter.execute(planConfig, jobId ?? `${agentId}-plan`, planPrompt, {
       resumeSessionId: liveSession(sessionId, cwd),
       cwd,
       onProgress,
@@ -1895,7 +1905,7 @@ async function runPlanApprovalGate(
       clearPmSession(agentId);
       sessionId = undefined;
       planPrompt = buildWorkerPrompt(agentDef, undefined, `${PLAN_PREFIX}\n\n${request}`, projectName, jobId);
-      planResult = await adapter.execute(planConfig, `${agentId}-plan`, planPrompt, {
+      planResult = await adapter.execute(planConfig, jobId ?? `${agentId}-plan`, planPrompt, {
         cwd,
         onProgress,
         onSpawn: makeChildPidRegistrar(jobId),
@@ -2009,7 +2019,7 @@ async function finalizeWorkerResult(
       }
 
       const bashFeedback = `[Bash 실행 결과]\n${bashResults.join("\n\n")}\n[결과 끝]\n\n위 결과를 확인하고 작업을 계속하세요.`;
-      result = await adapter.execute(config, `${agentId}-job`, bashFeedback, {
+      result = await adapter.execute(config, jobId ?? `${agentId}-job`, bashFeedback, {
         resumeSessionId: liveSession(loadPmSession(agentId), cwd),
         cwd,
         onProgress,
@@ -2190,7 +2200,7 @@ ${request}
 
 위 요청을 지금 실행하세요. 모든 도구 사용 가능합니다.`, projectName, jobId);
     if (!execResumeSid) console.warn(`[${agentId}] 계획 세션 유실 → 원 요청 폴백으로 실행`);
-    const executeResult = await adapter.execute(config, `${agentId}-job`, executePrompt, {
+    const executeResult = await adapter.execute(config, jobId ?? `${agentId}-job`, executePrompt, {
       resumeSessionId: execResumeSid,
       cwd,
       onProgress,
@@ -2234,7 +2244,7 @@ ${request}
   const prompt = buildWorkerPrompt(agentDef, sessionId, request, projectName, jobId);
   if (!sessionId) console.log(`[${agentId}] 새 세션으로 시작 (위키 로드됨)`);
 
-  let result = await adapter.execute(config, `${agentId}-job`, prompt, {
+  let result = await adapter.execute(config, jobId ?? `${agentId}-job`, prompt, {
     resumeSessionId: liveSession(sessionId, cwd),
     cwd,
     onProgress,
@@ -2255,7 +2265,7 @@ ${request}
     clearPmSession(agentId);
     sessionId = undefined;
     const retryPrompt = buildWorkerPrompt(agentDef, undefined, request, projectName, jobId);
-    result = await adapter.execute(config, `${agentId}-job`, retryPrompt, {
+    result = await adapter.execute(config, jobId ?? `${agentId}-job`, retryPrompt, {
       cwd,
       onProgress,
       onSpawn: makeChildPidRegistrar(jobId),
@@ -2593,7 +2603,7 @@ async function processJob(jobId: string): Promise<void> {
         const finalResult = job.stageResults!.join("\n\n---\n\n");
         
         // QA 보고서 구조개선 ①: exit + stderr + stdout 종합 분류
-        const classified = classifyExit(finalResult, job.logs, true); // agentSuccess=true (multi-stage 성공)
+        const classified = classifyExit(finalResult, job.logs, true, undefined, job.skipOutput === true); // agentSuccess=true (multi-stage 성공)
         job.status = classified.status;
         
         // Stage 1: 워커 결과 품질 검사 (delegation_only 감지)
@@ -2705,7 +2715,7 @@ async function processJob(jobId: string): Promise<void> {
 
           {
             // QA 보고서 구조개선 ①: exit + stderr + stdout 종합 분류
-            const classified = classifyExit(taskResult, job.logs, true); // agentSuccess=true (try 안 성공)
+            const classified = classifyExit(taskResult, job.logs, true, undefined, job.skipOutput === true); // agentSuccess=true (try 안 성공)
             job.status = classified.status;
             
             // Stage 1: 워커 결과 품질 검사 (delegation_only 감지)
@@ -2958,12 +2968,19 @@ function snapshotCodeChanges(cwd: string | undefined): string[] | null {
 //   유령 경로를 만들었다(.posted 26건 실재). 소비처가 표시·전달 4곳이라 링크가 깨지고
 //   QA 핸드오프(§산출물 파일)를 stat하면 오탐 FAIL이 났다.
 //   확장자 목록·경계 규약은 ./utils/artifact-ext.ts 단일 소스로 이관 — 08-08 qa-auto-judge.ts와 공유.
+// [2026-10-05 핫픽스, 잡 938bbcb0] 읽기 전용 참조 경로가 '산출물'로 승격되는 결함 차단.
+//   extractOutputPathsFromText는 라벨을 보지 않고 로그 본문에서 history/… 경로를 통째로 긁으므로
+//   워커가 «읽기만» 한 경로도 산출물이 된다. 그게 QA «판정 대상 고정»으로 넘어가 4일 전 종결호를
+//   피검체로 만들어 FAIL을 유발했다. 기전·근거는 isArtifactModifiedSince 주석에 전부 남겼다.
+//   ⇒ 이 잡이 시작한 뒤 수정된 파일만 산출물로 인정한다(대응 검사).
 function extractOutputFiles(job: Job): string[] {
   const files = new Set<string>();
   for (const log of job.logs) {
     for (const p of extractOutputPathsFromText(log)) files.add(p);
   }
-  return [...files];
+  return [...files].filter((p) =>
+    isArtifactModifiedSince(p, job.cwd || PROJECT_SELF_DIR, job.startedAt),
+  );
 }
 
 function extractPreview(job: Job): string {
@@ -3284,6 +3301,19 @@ TODO 태그 사용 금지.`;
           return; // QA 생성 건너뜀 (IIFE 내부 return — processCallback 전체 흐름은 계속)
         }
         
+        const review = await selectQaReview({
+          request: job.request, report: job.fullResult ?? '', codeChanges: jobScopedCodeChanges,
+        });
+        auditLog('qa.profile_selected', { jobId: job.id, ...review });
+        // Jev 호출 비용을 원장에 남긴다(jev-decisions/docs/operations.md 3장 — 기록 안 되는 통합은 배포 금지).
+        if (review.inputTokens !== undefined && review.costUsd !== undefined) {
+          logCost("qa", job.id, {
+            costUsd: review.costUsd, inputTokens: review.inputTokens, outputTokens: review.outputTokens ?? 0,
+            cacheReadTokens: 0, cacheCreateTokens: 0, durationMs: review.elapsedMs, model: review.model,
+          }, "jev:qa-profile");
+        }
+        if (job.status !== 'completed' || job.skipQa || process.env.AUTO_QA_TRIGGER === 'false') return;
+
         // PASS → 기존 QA 흐름 진행
         const origTitle = job.request.split("\n")[0].trim().slice(0, 80);
         const qaReport = (job.fullResult ?? job.logs.slice(-20).join("\n")).slice(0, 12000);
@@ -3312,25 +3342,22 @@ TODO 태그 사용 금지.`;
         `## 워커 5단 보고/로그 (말미)\n${qaReport}\n\n` +
         `## 산출물 파일\n${outputFilesList}\n\n` +
         `## 🎯 판정 대상 고정 (이 경로·이 시각의 파일만 본다)\n${qaTargets}\n` +
-        `- 위 절대경로 **외의 파일로 판정하지 말 것.** 같은 주제의 구본이 다른 디렉터리에 남아 있을 수 있다.\n` +
-        `- 지적하기 전에 그 문자열을 위 파일에 직접 grep해 부재를 확인할 것. 히트하면 그 지적은 이전 회차 대상(stale)이다.\n` +
-        `- 지적이 전부 stale이어도 **결론 수치는 따로 검산**할 것 — 총계는 맞고 지목만 틀린 FAIL이 실제로 있었다(2026-08-21).\n\n` +
-        `## ⚠️ 필수 검증 절차 (모두 실제 실행)\n` +
-        `1. **타입 체크**: \`npx tsc --noEmit\` (대상 프로젝트) → 출력 첨부\n` +
-        `2. **린트**: \`npm run lint\` 또는 \`eslint\` (가능 시) → 출력 첨부\n` +
-        `3. **유닛 테스트**: \`npm test\` / \`vitest run\` / \`jest\` (관련 파일에 한해) → 통과율 첨부\n` +
-        `4. **E2E/스모크 테스트**: \`npm run test:e2e\` / \`playwright test\` / dev 서버 + curl 체크 (UI 변경 시 필수) → 결과 첨부\n` +
-        `5. **회귀 체크**: 변경 파일 import 그래프 상 영향 파일 자체 grep + 빌드(\`npm run build\`) 통과 여부\n\n` +
-        `## 판정 규칙 (엄격)\n` +
-        `- ✅ **통과**: 1~5 모두 실행 + 모두 PASS (실행 출력 첨부 필수)\n` +
-        `- ⚠️ **조건부 통과**: 1~5 중 일부 실행 불가 (이유 명시) + 실행분 모두 PASS\n` +
-        `- ❌ **거부**: 단 하나라도 FAIL + 실행 로그 첨부\n` +
-        `- 🚫 **검증 불가 처리**: 환경 미비로 실행 불가 시 "검증 불가 (사유)" 명시 — 분석/팩트체크 단독 판정 금지\n\n` +
-        `## 금지 사항\n` +
-        `- 코드 진단·정책 분석만으로 "통과" 판정 금지\n` +
-        `- 실행 출력 없이 "정상 동작 예상" 추측 판정 금지\n` +
-        `- 변경 라인 직접 읽고 "문제 없음" 단언 금지 (실행 증거 필수)\n\n` +
-        `5단 QA 보고 필수 (검증 항목별 실행 명령·출력·결과 / 발견 문제 / 종합 판정).`;
+        // [2026-10-05 핫픽스, 잡 938bbcb0] 산출물 0건 잡의 «검증 불가» 열화 차단.
+        //   아래 3개 지시는 «판정 대상이 있다»를 전제한다. 산출물이 정당하게 0건인 잡
+        //   (예: 인박스 비어서 처리 0건인 루프 표본)에 그대로 붙으면 QA가 피검체 부재를
+        //   근거로 «검증 불가»를 낸다(procedure_qa-target-fixation-fails-…, 2026-10-03).
+        //   읽기 전용 경로를 산출물에서 걷어내면서 이 분기에 들어오는 잡이 늘어나므로 같이 막는다.
+        //   ★ 표본 QA 자체는 끄지 않는다 — «0건이었다»는 주장이 거짓일 수 있고, 그걸 감사하는
+        //     것이 표본의 존재 이유다. 판정을 포기하지 말고 원천에서 확인하라고 지시만 바꾼다.
+        ((job.outputFiles?.length ?? 0) === 0
+          ? `- 산출물 0건은 **그 자체로 결함이 아니다.** 처리할 건이 없었다면 정상이다.\n` +
+            `- 따라서 «피검체 없음»을 이유로 «검증 불가»를 내지 말 것. 대신 워커의 «처리 0건» 주장을\n` +
+            `  **원천에서 직접 확인**해 판정하라(인박스 디렉터리·DB 건수·대상 API를 직접 조회).\n` +
+            `- 원천에 처리할 건이 실제로 없었다면 합격이다. 있었는데 0건이라 보고했다면 불합격이다.\n\n`
+          : `- 위 절대경로 **외의 파일로 판정하지 말 것.** 같은 주제의 구본이 다른 디렉터리에 남아 있을 수 있다.\n` +
+            `- 지적하기 전에 그 문자열을 위 파일에 직접 grep해 부재를 확인할 것. 히트하면 그 지적은 이전 회차 대상(stale)이다.\n` +
+            `- 지적이 전부 stale이어도 **결론 수치는 따로 검산**할 것 — 총계는 맞고 지목만 틀린 FAIL이 실제로 있었다(2026-08-21).\n\n`) +
+        qaVerificationInstructions(review.profile);
       // 원본 Job의 Todo 찾기 — QA Job을 같은 Todo에 연결하여 Task 게이지에 표시
       const origTodos = getTodosByJobId(job.id);
       const origTodoId = origTodos.length > 0 ? origTodos[0].id : undefined;
@@ -3352,6 +3379,12 @@ TODO 태그 사용 금지.`;
         origTodoId,       // todoId: 원본과 같은 Todo에 연결 (Task 게이지 표시용)
       );
       qaJob.qaTriggered = true;
+      // QA 모델 티어: codex QA면 위험도에 따라 sol/terra (2026-09-28). 다른 실행기면 기본 모델 유지.
+      {
+        const qaModel = pickQaModel({ adapter: getWorkerAgent("qa")?.adapter, reason: qaDecision.reason, profile: review.profile });
+        if (qaModel) (qaJob as Job & { model?: string }).model = qaModel;
+        console.log(`[AutoQA] QA 모델: ${qaModel ?? "기본"} (사유 ${qaDecision.reason} · 유형 ${review.profile})`);
+      }
       saveJobs();
       console.log(`[AutoQA] 워커 완료 → 우즈(qa) 자동 위임: jobId=${qaJob.id.slice(0, 8)} (after=${job.id.slice(0, 8)}, agent=${job.agent})`);
       } catch (err) {
@@ -3480,6 +3513,12 @@ export async function restartSelf(): Promise<void> {
   const flagPath = join(PROJECT_SELF_DIR, "history", ".self-restart");
   mkdirSync(join(PROJECT_SELF_DIR, "history"), { recursive: true });
   writeFileSync(flagPath, new Date().toISOString());
+
+  const isSystemdManaged = Boolean(process.env.INVOCATION_ID || process.env.JOURNAL_STREAM);
+  if (isSystemdManaged) {
+    console.log("[Self] systemd supervisor에 재시작을 요청합니다");
+    process.exit(75);
+  }
 
   const { spawn } = await import("node:child_process");
   const { openSync } = await import("node:fs");

@@ -8,6 +8,75 @@
 // 정본 교훈: history/genie/wiki/lessons_encoding_nfc_nfd.md
 import { basename, dirname, join, isAbsolute, sep } from "node:path";
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { MYCREW_HOME } from "../../config.js";
+
+/**
+ * 산출물 경로를 «코드 루트»와 «데이터 루트» 양쪽에서 해석한다.
+ *
+ * [2026-10-03 · 잡 1a689a52 QA 「검증 불가」의 진짜 원인]
+ *   호출부는 baseDir로 `job.cwd ?? PROJECT_SELF_DIR`를 준다. 그런데 산출물은
+ *   `history/` = **MYCREW_HOME** 아래에 있다. MYCREW_HOME이 PROJECT_SELF_DIR와 다른
+ *   인스턴스(릴리스 워크트리에서 실행 + 영속 데이터는 별 디렉터리)에서는
+ *   `history/outputs/<agent>/x.md` 가 코드 루트에 없으므로 **모든 상대경로 산출물이
+ *   유령으로 판정**된다 → 요청문의 «판정 대상 고정»이 "(없음)"이 되고, QA는 피검체가
+ *   없어 «검증 불가»를 낸다. 실제 파일은 디스크에 멀쩡히 있었다.
+ *   ★ 스코프 제한(동명 파일 오판 방지)은 base별로 그대로 유지된다 — 베이스만 하나 늘린다.
+ *
+ * [2026-10-05 · 판정기까지 확장] 커밋 5b6ae19은 표시·핸드오프 지점만 고쳤고
+ *   qa-auto-judge.ts의 precheckArtifacts(실제 FAIL 판정기)는 여전히
+ *   `job.cwd ?? PROJECT_SELF_DIR` 단일 베이스로 해석해, MYCREW_HOME 분리 인스턴스에서
+ *   「파일 미존재」FAIL을 계속 생산했다 → 이 함수를 export해 판정기도 같은 해석을 쓴다.
+ *   ★ 베이스 확장은 **미존재 오탐만 구제**한다. 두 베이스 어디에도 없으면 그대로 null —
+ *     음성 대조(진짜 미존재 FAIL)는 보존된다.
+ *   ★ 상위 주석의 "precheckArtifacts에 끼워넣지 말 것" 경고는 formatter 2종(유령 제외 표시)
+ *     한정이다. 이 함수는 «경로 해석»이지 «유령 필터»가 아니므로 관할이 겹치지 않는다.
+ */
+export function resolveArtifactAcrossBases(p: string, baseDir: string): string | null {
+  const bases = baseDir === MYCREW_HOME ? [baseDir] : [baseDir, MYCREW_HOME];
+  for (const base of bases) {
+    const full = isAbsolute(p) ? p : join(base, p);
+    const real = resolveExistingArtifact(full, p, base);
+    if (real) return real;
+  }
+  return null;
+}
+
+/**
+ * 보고된 산출물 경로가 «이 잡이 실제로 건드린 파일»인가 — mtime 대응 검사.
+ *
+ * [2026-10-05 · 잡 938bbcb0] 읽기 전용 참조 경로의 산출물 승격 차단.
+ *   jobs.ts의 extractOutputFiles는 라벨을 보지 않고 로그 본문에서 `history/…` 경로를 통째로
+ *   긁는다(qa-auto-judge.ts의 extractArtifactPaths는 라벨 기반인데 이쪽만 아니었다 — 이 비대칭이
+ *   결함). 그래서 `[진행] 파일 읽는 중: history/outputs/repo-scout/ai-release/2026-10-01.json`
+ *   처럼 워커가 **읽기만** 한 경로가 outputFiles 유일 항목이 됐고, QA «판정 대상 고정»으로
+ *   넘어가 4일 전 종결호를 피검체로 만들어 FAIL을 유발했다(QA 0f41d034 → 핫픽스 938bbcb0).
+ *
+ *   ★ 신호는 이미 있었다 — formatQaTargetsWithStamp가 2026-08-21부터 mtime을 찍어 QA에게
+ *     보여주고 있었다. 그 값이 잡 시작보다 4일 빨랐는데도 아무도 그걸로 «거르지» 않았다.
+ *     선언이 아니라 대응으로 게이트한다.
+ *
+ *   ★ 미존재는 여기서 판정하지 않는다(통과시킨다). 유령 차단은 표시 지점
+ *     formatArtifactListForHandoff의 관할이며(2026-08-11 조치), 관할을 겹치면 한쪽 수정이
+ *     다른 쪽을 조용히 무력화한다.
+ *
+ * @param since 기준 시각(보통 job.startedAt). 없으면 비교 기준이 없으므로 통과.
+ */
+export function isArtifactModifiedSince(
+  reportedPath: string,
+  baseDir: string,
+  since: string | undefined,
+): boolean {
+  if (!since) return true;
+  const real = resolveArtifactAcrossBases(reportedPath, baseDir);
+  if (!real) return true;
+  const sinceMs = new Date(since).getTime();
+  if (Number.isNaN(sinceMs)) return true; // 손상된 타임스탬프로 산출물을 지우지 않는다
+  try {
+    return statSync(real).mtimeMs >= sinceMs;
+  } catch {
+    return true; // stat 불가(권한 등) → 기존 동작 보존
+  }
+}
 
 /**
  * macOS NFD 파일명이 조합형(NFC)과 매칭되지 않는 문제를 막는다.
@@ -40,8 +109,7 @@ export function formatArtifactListForHandoff(paths: string[], baseDir: string): 
   const kept: string[] = [];
   let dropped = 0;
   for (const p of paths) {
-    const fullPath = isAbsolute(p) ? p : join(baseDir, p);
-    if (resolveExistingArtifact(fullPath, p, baseDir)) kept.push(p);
+    if (resolveArtifactAcrossBases(p, baseDir)) kept.push(p);
     else dropped++;
   }
   if (dropped === 0) return kept.join(", ");
@@ -71,8 +139,7 @@ export function formatQaTargetsWithStamp(paths: string[], baseDir: string): stri
   if (!paths.length) return "(없음 — 산출물 없는 잡)";
   const lines: string[] = [];
   for (const p of paths) {
-    const fullPath = isAbsolute(p) ? p : join(baseDir, p);
-    const real = resolveExistingArtifact(fullPath, p, baseDir);
+    const real = resolveArtifactAcrossBases(p, baseDir);
     if (!real) continue; // 유령 — 조용히 빼되 아래 계수 문구로 드러낸다
     let stamp = "mtime 조회 실패";
     try {
